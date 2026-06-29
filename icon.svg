@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#1C2126"/>
+  <path d="M100 100 L412 100 L412 296 Q412 412 256 452 Q100 412 100 296 Z" fill="none" stroke="#7C9C8A" stroke-width="10"/>
+  <line x1="256" y1="100" x2="256" y2="452" stroke="#2A3138" stroke-width="8"/>
+  <line x1="100" y1="276" x2="412" y2="276" stroke="#2A3138" stroke-width="8"/>
+  <rect x="100" y="100" width="156" height="176" fill="rgba(124,156,138,0.2)"/>
+  <rect x="256" y="100" width="156" height="176" fill="rgba(201,168,106,0.2)"/>
+  <path d="M100 276 L256 276 L256 452 Q100 412 100 296 Z" fill="rgba(91,155,213,0.2)"/>
+  <path d="M256 276 L412 276 L412 296 Q412 412 256 452 Z" fill="rgba(166,130,107,0.2)"/>
+  <text x="178" y="215" font-family="Georgia,serif" font-size="80" font-weight="700" fill="#7C9C8A" text-anchor="middle">J</text>
+  <text x="334" y="215" font-family="Georgia,serif" font-size="80" font-weight="700" fill="#C9A86A" text-anchor="middle">J</text>
+  <text x="178" y="370" font-family="Georgia,serif" font-size="80" font-weight="700" fill="#5B9BD5" text-anchor="middle">R</text>
+  <text x="334" y="370" font-family="Georgia,serif" font-size="80" font-weight="700" fill="#A6826B" text-anchor="middle">C</text>
+</svg>
