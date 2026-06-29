@@ -11,6 +11,24 @@
 <meta name="theme-color" content="#EEF1EE" media="(prefers-color-scheme: light)">
 <meta name="description" content="The Reeves family command center">
 <link rel="manifest" href="#" id="pwa-manifest-link">
+
+<!-- Supabase client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // ── FILL THESE IN before deploying ──────────
+  const SUPABASE_URL = 'https://itkkkhpgvejpcvwtmihj.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_y3fJXHAeW1AwzvKtOF3zDA_fj2ocSct';
+  // ────────────────────────────────────────────
+
+  // These will be undefined until you fill in the values above.
+  // The app will still run in demo mode without them.
+  const _supabase = (SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL')
+    ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+  // Helper — returns true if Supabase is connected
+  function isSupabaseReady() { return _supabase !== null; }
+</script>
 <title>Reeves HQ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400;1,700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
