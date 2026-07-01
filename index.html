@@ -3992,38 +3992,13 @@ html, body {
       <!-- Your rewards — only shows when there's something to act on -->
       <div class="screen-pad" style="padding-bottom:0; padding-top:16px;" id="jason-rewards-section"></div>
 
-      <!-- Contact nudges -->
-      <div class="screen-pad" style="padding-bottom:0; padding-top:16px;">
+      <!-- Contact nudges — rendered dynamically from real people data -->
+      <div class="screen-pad" style="padding-bottom:0; padding-top:16px;" id="nudge-section">
         <div class="section-eyebrow">Reach out</div>
-        <div class="nudge-card nudge-card-clickable" id="nudge-followup-sarah" onclick="showPerson('sarah')">
-          <div class="nudge-avatar" style="background:var(--ridley-bg);color:var(--ridley);border-color:var(--ridley-border);">SC</div>
-          <div class="nudge-info">
-            <div class="nudge-name">Sarah Chen</div>
-            <div class="nudge-sub">Owes you: Revised mockups for Q3 deck <span class="nudge-due-tag overdue" id="followup-sarah-due">· was due Jun 10</span></div>
-          </div>
-          <button class="nudge-check-btn" title="Mark received" onclick="markFollowupReceived(event, 'sarah', 0)">
-            <svg width="13" height="13" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-        <div class="nudge-card" id="nudge-marcus">
-          <div class="nudge-avatar">M</div>
-          <div class="nudge-info">
-            <div class="nudge-name">Marcus Webb</div>
-            <div class="nudge-sub">Last contact 3 weeks ago · monthly</div>
-          </div>
-          <button class="nudge-btn" onclick="openOutreachLog('marcus', this.closest('.nudge-card'))">Reach out</button>
-        </div>
-        <div class="nudge-card" id="nudge-dana" style="background:var(--jason-bg); border-color:var(--jason-border);">
-          <div class="nudge-avatar" style="background:var(--jason-bg);color:var(--jason);border-color:var(--jason-border);">D</div>
-          <div class="nudge-info">
-            <div class="nudge-name">Dana Kim</div>
-            <div class="nudge-sub">Last contact 6 weeks ago · quarterly</div>
-          </div>
-          <button class="nudge-btn" style="background:var(--jason);" onclick="openOutreachLog('dana', this.closest('.nudge-card'))">Reach out</button>
-        </div>
+        <div id="nudge-cards"></div>
       </div>
 
-      <!-- Family morning widget -->
+            <!-- Family morning widget -->
       <div class="screen-pad" style="padding-bottom:0; padding-top:16px;">
         <div class="section-eyebrow">Morning</div>
         <div class="weather-strip" onclick="openForecastFromToday()">
@@ -6753,6 +6728,91 @@ function updatePomDisplay() {
 let peopleData = []; // populated from Supabase on login
 
 // ── Load people from Supabase ──────────────────────────────────────
+// ── Render nudge cards on Today screen ────────────────────────────
+function renderNudges() {
+  const container = document.getElementById('nudge-cards');
+  const section = document.getElementById('nudge-section');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const nudgeItems = [];
+
+  // 1. Personal contacts overdue for outreach
+  peopleData.filter(p => p.type === 'personal' && p.nudgeDays > 0).forEach(p => {
+    const last = p.lastContacted ? new Date(p.lastContacted) : null;
+    const daysSince = last ? Math.floor((today - last) / 86400000) : 999;
+    if (daysSince >= p.nudgeDays) {
+      const cadenceLabel = p.nudgeDays >= 90 ? 'quarterly' : p.nudgeDays >= 30 ? 'monthly' : p.nudgeDays >= 14 ? 'biweekly' : 'weekly';
+      const weeksAgo = Math.floor(daysSince / 7);
+      const subText = last
+        ? `Last contact ${weeksAgo} week${weeksAgo !== 1 ? 's' : ''} ago · ${cadenceLabel}`
+        : `Never contacted · ${cadenceLabel}`;
+      nudgeItems.push({ person: p, type: 'outreach', sub: subText, urgency: daysSince });
+    }
+  });
+
+  // Sort by most overdue first
+  nudgeItems.sort((a, b) => b.urgency - a.urgency);
+
+  if (nudgeItems.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+
+  nudgeItems.forEach(item => {
+    const p = item.person;
+    const initials = p.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const isOverdue = item.urgency > p.nudgeDays * 1.5;
+
+    const card = document.createElement('div');
+    card.className = 'nudge-card nudge-card-clickable';
+    card.dataset.personId = p.id;
+    if (isOverdue) card.style.cssText = 'background:var(--jason-bg); border-color:var(--jason-border);';
+    card.onclick = () => { switchScreen('people'); showPerson(p.id); };
+    card.innerHTML = `
+      <div class="nudge-avatar">${initials}</div>
+      <div class="nudge-info">
+        <div class="nudge-name">${p.name}</div>
+        <div class="nudge-sub">${item.sub}</div>
+      </div>
+      <button class="nudge-btn" ${isOverdue ? 'style="background:var(--jason);"' : ''}
+        onclick="event.stopPropagation(); logOutreachAndDismiss(event, '${p.id}', this.closest('.nudge-card'))">
+        Reach out
+      </button>`;
+    container.appendChild(card);
+  });
+}
+
+// ── Log outreach and dismiss nudge card ───────────────────────────
+async function logOutreachAndDismiss(evt, personId, card) {
+  evt.stopPropagation();
+  // Update last_contacted_at in Supabase
+  if (isSupabaseReady()) {
+    const today = new Date().toISOString().slice(0, 10);
+    await _supabase.from('unified_people')
+      .update({ last_contacted_at: today })
+      .eq('id', personId);
+    // Update local data
+    const person = peopleData.find(p => p.id === personId);
+    if (person) person.lastContacted = today;
+  }
+  // Animate card out
+  card.style.transition = 'opacity 0.3s, transform 0.3s';
+  card.style.opacity = '0';
+  card.style.transform = 'translateX(20px)';
+  setTimeout(() => {
+    card.remove();
+    // Hide section if no cards left
+    const container = document.getElementById('nudge-cards');
+    if (container && container.children.length === 0) {
+      document.getElementById('nudge-section').style.display = 'none';
+    }
+  }, 300);
+}
+
 async function loadPeople() {
   if (!isSupabaseReady()) return;
   const { data, error } = await _supabase
@@ -6789,6 +6849,7 @@ async function loadPeople() {
 
   // Load open items for all people
   await loadOpenItems();
+  renderNudges();
 }
 
 // ── Load open items from Supabase ─────────────────────────────────
@@ -7002,7 +7063,7 @@ async function savePersonFromSheet() {
       await savePersonToDB(person, true);
     }
     // Update the person row in the list
-    const row = document.querySelector(`.person-row[onclick*="'${personSheetEditId}'"]`);
+    const row = document.querySelector(`.person-row[data-person-id="${personSheetEditId}"]`);
     if (row) {
       row.querySelector('.person-name').textContent = name;
       row.querySelector('.person-sub').textContent = role || dept || personTypeBadgeLabels[personSheetType];
@@ -7035,7 +7096,7 @@ async function deletePersonFromSheet() {
   const id = personSheetEditId;
   await deletePersonFromDB(id);
   peopleData = peopleData.filter(p => p.id !== id);
-  const row = document.querySelector(`.person-row[onclick*="'${id}'"]`);
+  const row = document.querySelector(`.person-row[data-person-id="${id}"]`);
   if (row) row.remove();
   const detail = document.getElementById('person-detail-' + id);
   if (detail) detail.remove();
@@ -7054,7 +7115,8 @@ function renderNewPersonRow(person) {
   const row = document.createElement('div');
   row.className = 'person-row';
   row.dataset.type = dataType;
-  row.setAttribute('onclick', `showPerson('${person.id}')`);
+  row.dataset.personId = person.id;
+  row.onclick = () => showPerson(person.id);
   row.innerHTML = `
     <div class="person-avatar" style="background:var(${colorVar}-bg);color:var(${colorVar});border-color:var(${colorVar}-border);">${initials}</div>
     <div class="person-info">
