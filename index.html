@@ -5499,6 +5499,7 @@ function enterApp(user) {
   if (user === 'jason') {
     sub.textContent = 'Jason';
     document.getElementById('nav-people').style.display = 'flex';
+    loadPeople(); // load real people + open items from Supabase
   } else {
     sub.textContent = 'Jenny';
     document.getElementById('nav-people').style.display = 'none';
@@ -6749,13 +6750,137 @@ function updatePomDisplay() {
 // ═══════════════════════════════════════════
 
 // Central people data store (mirrors what's in the HTML as static demo rows)
-let peopleData = [
-  { id: 'sarah',  name: 'Sarah Chen',  role: 'Head of Design',   dept: 'Product',  type: 'direct',               nudgeDays: 0 },
-  { id: 'marcus', name: 'Marcus Webb', role: 'Client · Apex Solutions', dept: 'Sales', type: 'work',             nudgeDays: 30 },
-  { id: 'linda',  name: 'Linda Park',  role: 'VP Engineering',   dept: 'Company',  type: 'exec',                 nudgeDays: 0 },
-  { id: 'dana',   name: 'Dana Kim',    role: 'Friend',           dept: '',         type: 'personal',             nudgeDays: 90 },
-  { id: 'tom',    name: 'Tom Rivera',  role: 'Senior Engineer',  dept: 'Platform', type: 'direct',               nudgeDays: 0 },
-];
+let peopleData = []; // populated from Supabase on login
+
+// ── Load people from Supabase ──────────────────────────────────────
+async function loadPeople() {
+  if (!isSupabaseReady()) return;
+  const { data, error } = await _supabase
+    .from('unified_people')
+    .select('*')
+    .order('name', { ascending: true });
+  if (error) { console.warn('[People] Load failed:', error.message); return; }
+
+  peopleData = (data || []).map(p => ({
+    id: p.id,
+    name: p.name,
+    role: p.role || '',
+    dept: '',
+    type: p.type || 'colleague',
+    nudgeDays: p.nudge_cadence_days || 0,
+    lastContacted: p.last_contacted_at || null,
+  }));
+
+  // Clear demo rows from HTML and render real data
+  const list = document.getElementById('people-rows');
+  if (list) {
+    list.innerHTML = '';
+    // Remove any hardcoded demo detail views
+    ['sarah','marcus','linda','dana','tom'].forEach(id => {
+      const el = document.getElementById('person-detail-' + id);
+      if (el) el.remove();
+    });
+  }
+
+  peopleData.forEach(person => {
+    renderNewPersonRow(person);
+    createPersonDetailStub(person);
+  });
+
+  // Load open items for all people
+  await loadOpenItems();
+}
+
+// ── Load open items from Supabase ─────────────────────────────────
+async function loadOpenItems() {
+  if (!isSupabaseReady()) return;
+  const { data, error } = await _supabase
+    .from('open_items')
+    .select('*')
+    .eq('done', false)
+    .order('created_at', { ascending: true });
+  if (error) { console.warn('[OpenItems] Load failed:', error.message); return; }
+
+  (data || []).forEach(item => {
+    const container = document.getElementById('open-items-' + item.person_id);
+    if (!container) return;
+
+    // Clear the empty state text if present
+    if (container.style.textAlign === 'center') {
+      container.style.textAlign = '';
+      container.style.color = '';
+      container.style.fontSize = '';
+      container.style.padding = '';
+      container.innerHTML = '';
+    }
+
+    // Add section label if first item of this direction
+    const directionLabel = item.direction === 'they_owe_me' ? 'They owe me' : 'I owe them';
+    const existingLabel = Array.from(container.querySelectorAll('.notes-block-label'))
+      .find(el => el.textContent === directionLabel);
+    if (!existingLabel) {
+      const label = document.createElement('div');
+      label.className = 'notes-block-label';
+      label.textContent = directionLabel;
+      container.appendChild(label);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'notes-item-check';
+    row.dataset.itemId = item.id;
+    row.onclick = (e) => toggleOpenItemDB(row, item.id, e);
+    row.innerHTML = `
+      <div class="notes-item-checkbox"></div>
+      <div class="notes-item-text">${item.text}</div>
+      <div class="notes-item-due" data-due="${item.due_date || ''}" onclick="editOpenItemDue(this, event)">
+        ${item.due_date ? formatDueDate(item.due_date) : '+ Due date'}
+      </div>`;
+    container.appendChild(row);
+  });
+}
+
+// ── Toggle open item done in Supabase ─────────────────────────────
+async function toggleOpenItemDB(row, itemId, evt) {
+  if (evt && evt.target.closest('.notes-item-due')) return;
+  row.classList.toggle('done');
+  const done = row.classList.contains('done');
+  const box = row.querySelector('.notes-item-checkbox');
+  box.classList.toggle('checked', done);
+  box.innerHTML = done
+    ? '<svg width="9" height="9" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>'
+    : '';
+  if (isSupabaseReady()) {
+    await _supabase.from('open_items').update({ done }).eq('id', itemId);
+    if (done) setTimeout(() => row.remove(), 600);
+  }
+}
+
+// ── Save person to Supabase ────────────────────────────────────────
+async function savePersonToDB(person, isEdit) {
+  if (!isSupabaseReady()) return person;
+  const row = {
+    owner_id: JASON_UID,
+    name: person.name,
+    role: person.role || '',
+    type: person.type,
+    nudge_cadence_days: person.nudgeDays || null,
+  };
+  if (isEdit) {
+    await _supabase.from('unified_people').update(row).eq('id', person.id);
+    return person;
+  } else {
+    const { data, error } = await _supabase
+      .from('unified_people').insert(row).select().single();
+    if (error) { console.warn('[People] Save failed:', error.message); return person; }
+    return { ...person, id: data.id };
+  }
+}
+
+// ── Delete person from Supabase ────────────────────────────────────
+async function deletePersonFromDB(id) {
+  if (!isSupabaseReady()) return;
+  await _supabase.from('unified_people').delete().eq('id', id);
+}
 
 let personSheetMode = 'add'; // 'add' | 'edit'
 let personSheetEditId = null;
@@ -6858,7 +6983,7 @@ function setPersonNudgeActive(days) {
   });
 }
 
-function savePersonFromSheet() {
+async function savePersonFromSheet() {
   const name = document.getElementById('person-name-input').value.trim();
   if (!name) return;
 
@@ -6867,7 +6992,6 @@ function savePersonFromSheet() {
   const isPersonal = personSheetType === 'personal';
 
   if (personSheetMode === 'edit' && personSheetEditId) {
-    // Update existing person in data store
     const person = peopleData.find(p => p.id === personSheetEditId);
     if (person) {
       person.name = name;
@@ -6875,13 +6999,14 @@ function savePersonFromSheet() {
       person.dept = dept;
       person.type = personSheetType;
       person.nudgeDays = isPersonal ? personSheetNudgeDays : 0;
+      await savePersonToDB(person, true);
     }
     // Update the person row in the list
     const row = document.querySelector(`.person-row[onclick*="'${personSheetEditId}'"]`);
     if (row) {
       row.querySelector('.person-name').textContent = name;
       row.querySelector('.person-sub').textContent = role || dept || personTypeBadgeLabels[personSheetType];
-      row.dataset.type = personTypeLabels[personSheetType];
+      row.dataset.type = personTypeLabels[personSheetType] || 'work';
     }
     // Update the person detail header
     const detail = document.getElementById('person-detail-' + personSheetEditId);
@@ -6894,9 +7019,9 @@ function savePersonFromSheet() {
       if (deptEl) deptEl.textContent = dept;
     }
   } else {
-    // Create new person
-    const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
-    const person = { id, name, role, dept, type: personSheetType, nudgeDays: isPersonal ? personSheetNudgeDays : 0 };
+    // Create new person — get UUID back from Supabase
+    let person = { id: 'temp-' + Date.now(), name, role, dept, type: personSheetType, nudgeDays: isPersonal ? personSheetNudgeDays : 0 };
+    person = await savePersonToDB(person, false);
     peopleData.push(person);
     renderNewPersonRow(person);
     createPersonDetailStub(person);
@@ -6905,9 +7030,10 @@ function savePersonFromSheet() {
   closeAddPerson();
 }
 
-function deletePersonFromSheet() {
+async function deletePersonFromSheet() {
   if (!personSheetEditId) return closeAddPerson();
   const id = personSheetEditId;
+  await deletePersonFromDB(id);
   peopleData = peopleData.filter(p => p.id !== id);
   const row = document.querySelector(`.person-row[onclick*="'${id}'"]`);
   if (row) row.remove();
