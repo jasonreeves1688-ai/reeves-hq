@@ -5640,7 +5640,7 @@ function confirmDailyPick() {
   sortMattersNowToTop(list);
 
   document.getElementById('pick-screen').classList.remove('show');
-  document.getElementById('main-app').style.display = 'flex';
+  document.getElementById('main-app').style.display = window.innerWidth >= 900 ? 'grid' : 'flex';
   document.getElementById('fab-btn').style.display = 'flex';
   showTodayFor(who);
 
@@ -8469,6 +8469,14 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register(swUrl, { scope: '/' })
     .catch(() => {}); // fail silently if blocked
 }
+
+// Keep main-app display mode in sync when window is resized
+window.addEventListener('resize', () => {
+  const app = document.getElementById('main-app');
+  if (app && app.style.display !== 'none') {
+    app.style.display = window.innerWidth >= 900 ? 'grid' : 'flex';
+  }
+});
 </script>
 
 </body>
