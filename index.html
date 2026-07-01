@@ -6779,7 +6779,7 @@ function renderNudges() {
         <div class="nudge-sub">${item.sub}</div>
       </div>
       <button class="nudge-btn" ${isOverdue ? 'style="background:var(--jason);"' : ''}
-        onclick="event.stopPropagation(); logOutreachAndDismiss(event, '${p.id}', this.closest('.nudge-card'))">
+        onclick="event.stopPropagation(); openOutreachLog('${p.id}', this.closest('.nudge-card'))">
         Reach out
       </button>`;
     container.appendChild(card);
@@ -6811,6 +6811,48 @@ async function logOutreachAndDismiss(evt, personId, card) {
       document.getElementById('nudge-section').style.display = 'none';
     }
   }, 300);
+}
+
+// ── Load outreach log entries from Supabase ───────────────────────
+async function loadOutreachLog() {
+  if (!isSupabaseReady()) return;
+  const { data, error } = await _supabase
+    .from('outreach_log')
+    .select('*')
+    .order('logged_at', { ascending: false });
+  if (error) { console.warn('[OutreachLog] Load failed:', error.message); return; }
+
+  (data || []).forEach(entry => {
+    const detail = document.getElementById('person-detail-' + entry.person_id);
+    if (!detail) return;
+
+    // Find or create the outreach log container
+    let logSection = detail.querySelector('.outreach-log-entries');
+    if (!logSection) {
+      // Replace the empty state placeholder
+      const placeholder = detail.querySelector('.meeting-entry');
+      if (placeholder) placeholder.remove();
+      logSection = document.createElement('div');
+      logSection.className = 'outreach-log-entries';
+      detail.querySelector('.notes-section').appendChild(logSection);
+    }
+
+    const [emoji, ...labelParts] = (entry.method || '☎️ Phone call').split(' ');
+    const label = labelParts.join(' ');
+    const dateStr = entry.logged_at
+      ? new Date(entry.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : 'Unknown date';
+
+    const el = document.createElement('div');
+    el.className = 'outreach-entry';
+    el.innerHTML = `
+      <div class="outreach-method">${emoji}</div>
+      <div class="outreach-info">
+        <div class="outreach-date">${dateStr} · ${label}</div>
+        ${entry.note ? `<div class="outreach-note">${entry.note.replace(/</g,'&lt;')}</div>` : ''}
+      </div>`;
+    logSection.appendChild(el);
+  });
 }
 
 async function loadPeople() {
@@ -6849,6 +6891,7 @@ async function loadPeople() {
 
   // Load open items for all people
   await loadOpenItems();
+  await loadOutreachLog();
   renderNudges();
 }
 
@@ -7588,18 +7631,37 @@ function setOutreachMethod(chip) {
   outreachLogMethod = chip.dataset.method;
 }
 
-function submitOutreachLog() {
+async function submitOutreachLog() {
   const note = document.getElementById('outreach-note-input').value.trim();
   if (!outreachLogPersonId) return closeOutreachLog();
 
   const [emoji, ...labelParts] = outreachLogMethod.split(' ');
   const label = labelParts.join(' ');
+  const today = new Date().toISOString().slice(0, 10);
 
-  // Log to the person's profile, if it exists
+  // Save to Supabase
+  if (isSupabaseReady()) {
+    await _supabase.from('outreach_log').insert({
+      owner_id: JASON_UID,
+      person_id: outreachLogPersonId,
+      method: outreachLogMethod,
+      note: note || null,
+      logged_at: today,
+    });
+    // Update last_contacted_at on the person
+    await _supabase.from('unified_people')
+      .update({ last_contacted_at: today })
+      .eq('id', outreachLogPersonId);
+    // Update local people data
+    const person = peopleData.find(p => p.id === outreachLogPersonId);
+    if (person) person.lastContacted = today;
+  }
+
+  // Add entry to person detail view
   const detail = document.getElementById('person-detail-' + outreachLogPersonId);
   if (detail) {
     let logBlock = detail.querySelector('.meeting-entry');
-    if (!logBlock) {
+    if (!logBlock || logBlock.style.textAlign === 'center') {
       logBlock = document.createElement('div');
       logBlock.className = 'meeting-entry';
       detail.querySelector('.notes-section').appendChild(logBlock);
@@ -7615,15 +7677,19 @@ function submitOutreachLog() {
     logBlock.insertBefore(entry, logBlock.firstChild);
   }
 
-  // If logged from a Today nudge card, mark it done and fade it out
+  // Dismiss the nudge card if triggered from Today
   if (outreachLogNudgeCard) {
-    const sub = outreachLogNudgeCard.querySelector('.nudge-sub');
-    if (sub) sub.textContent = `Reached out just now · ${label}`;
     outreachLogNudgeCard.style.transition = 'opacity 0.3s, transform 0.3s';
     outreachLogNudgeCard.style.opacity = '0';
     outreachLogNudgeCard.style.transform = 'scale(0.97)';
-    setTimeout(() => outreachLogNudgeCard.remove(), 300);
-    outreachLogNudgeCard = null;
+    setTimeout(() => {
+      if (outreachLogNudgeCard) outreachLogNudgeCard.remove();
+      outreachLogNudgeCard = null;
+      const container = document.getElementById('nudge-cards');
+      if (container && container.children.length === 0) {
+        document.getElementById('nudge-section').style.display = 'none';
+      }
+    }, 300);
   }
 
   closeOutreachLog();
