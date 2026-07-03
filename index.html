@@ -5238,57 +5238,93 @@ let pomInterval = null;
 let currentKidPin = '';
 let selectedKid = '';
 
-// Prize pools (editable by parents)
-const prizePool = {
-  ridley: {
-    small: ['🍦 Ice cream trip', '🎮 30 min extra screen time', '🎬 Movie night pick', '🍕 Pizza for dinner', '💃 New dance gear'],
-    big:   ['💃 Dance class', '🎡 Amusement park day', '🎭 Musical theater tickets', '🎮 New game'],
-  },
-  connor: {
-    small: ['🍦 Ice cream trip', '🎮 30 min extra screen time', '⚽ New soccer gear', '🎬 Movie night pick', '🍕 Pizza for dinner'],
-    big:   ['⚽ Soccer camp', '🎡 Amusement park day', '🏊 Swimming lessons', '🎮 New game'],
-  },
+// ── Kids data store — populated from Supabase ─────────────────
+let kidsStore = {
+  profiles: {},    // { ridley: { id, name, emoji, color, points }, connor: {...} }
+  chores: [],      // all chores from Supabase
+  prizes: { small: [], big: [] },  // prizes from Supabase
+  completions: [], // chore_completions for trophy/history
+  redemptions: [], // prize_redemptions for trophy
 };
 
-// Deduct-points actions — shared across both kids by default, same pattern as prize pools
-const deductCategories = {
-  shared: [
-    { emoji: '😤', name: 'Being rude', pts: -2 },
-    { emoji: '🐌', name: 'Dawdling at bedtime', pts: -1 },
-    { emoji: '📱', name: 'Screen time without asking', pts: -3 },
-  ],
-};
+// Deduct categories (behaviour chores with negative points)
+const deductCategories = { shared: [] };
 
-// Head-to-head challenges — race to a target, optional stake/prize
-let challenges = [
-  { id: 'ch1', name: 'Chore Race', targetPts: 30, stake: 'Pick the movie this weekend', startedAt: Date.now() - 4*86400000, done: false,
-    progress: { ridley: 19, connor: 12 } },
-];
+async function loadKidsData() {
+  if (!isSupabaseReady()) return;
 
-// Streak bonus config — consecutive days of chore completion earns a bonus
-let streakConfig = {
-  enabled: true,
-  milestones: [{ days: 3, bonus: 2 }, { days: 7, bonus: 5 }],
-};
-// Demo current streaks per kid (in production, computed from auditLog)
-let currentStreaks = { ridley: 4, connor: 1 };
+  // Load profiles
+  const { data: profiles } = await _supabase
+    .from('kids_profiles')
+    .select('*')
+    .order('name');
+  if (profiles) {
+    profiles.forEach(p => {
+      const key = p.name.toLowerCase();
+      kidsStore.profiles[key] = p;
+    });
+  }
 
-// Points
-const points = { ridley: 47, connor: 31 };
+  // Load chores
+  const { data: chores } = await _supabase
+    .from('chores')
+    .select('*')
+    .eq('active', true)
+    .order('name');
+  if (chores) {
+    kidsStore.chores = chores;
+    // Build deduct categories from negative-point behaviour chores
+    deductCategories.shared = chores
+      .filter(c => c.points < 0)
+      .map(c => ({ emoji: c.emoji, name: c.name, pts: c.points }));
+  }
 
-// Trophy collections — every redeemed prize becomes a medal
-const trophies = {
-  ridley: [
-    { emoji:'🍦', name:'Ice cream trip', date:'Jun 10', size:'small' },
-    { emoji:'🎬', name:'Movie night pick', date:'Jun 3', size:'small' },
-  ],
-  connor: [
-    { emoji:'⚽', name:'New soccer gear', date:'Jun 8', size:'small' },
-  ],
-};
+  // Load prizes
+  const { data: prizes } = await _supabase
+    .from('prizes')
+    .select('*')
+    .eq('active', true)
+    .order('name');
+  if (prizes) {
+    kidsStore.prizes.small = prizes.filter(p => p.size === 'small');
+    kidsStore.prizes.big = prizes.filter(p => p.size === 'big');
+  }
 
-// PIN codes (demo)
-const PINS = { ridley: '1234', connor: '5678' };
+  // Load recent completions for trophy wall
+  const { data: completions } = await _supabase
+    .from('chore_completions')
+    .select('*')
+    .order('completed_at', { ascending: false })
+    .limit(200);
+  if (completions) kidsStore.completions = completions;
+
+  // Load prize redemptions for trophy
+  const { data: redemptions } = await _supabase
+    .from('prize_redemptions')
+    .select('*')
+    .order('redeemed_at', { ascending: false });
+  if (redemptions) kidsStore.redemptions = redemptions;
+
+  // Update parent view point displays
+  ['ridley', 'connor'].forEach(kid => {
+    const profile = kidsStore.profiles[kid];
+    if (!profile) return;
+    const el = document.getElementById('parent-' + kid + '-pts');
+    if (el) el.textContent = profile.points + ' pts';
+    const bigEl = document.getElementById('p-' + kid + '-pts-big');
+    if (bigEl) bigEl.textContent = profile.points;
+  });
+}
+
+// Helper to get points for a kid
+function kidsPoints(kid) {
+  return kidsStore.profiles[kid]?.points || 0;
+}
+
+// Helper to get prize pool for a kid (prizes are shared)
+function kidsPrizePool(size) {
+  return kidsStore.prizes[size] || [];
+}
 
 // ═══════════════════════════════════════════
 //  JASON'S PERSONAL REWARDS (separate from kids — lives on his Today)
@@ -5482,6 +5518,8 @@ async function enterApp(user) {
 
   // Load tasks first — daily pick needs them to build the pool
   await loadTasks(user);
+  // Load kids data in background (non-blocking)
+  loadKidsData();
   openDailyPick(user);
 }
 
@@ -5898,9 +5936,10 @@ function goToKidPin(kid) {
   selectedKid = kid;
   currentKidPin = '';
 
-  const color = kid === 'ridley' ? '#5B9BD5' : '#A6826B';
-  const emoji = kid === 'ridley' ? '💃' : '⚽';
-  const name = kid === 'ridley' ? 'Ridley' : 'Connor';
+  const profile = kidsStore.profiles[kid];
+  const color = profile?.color || (kid === 'ridley' ? '#5B9BD5' : '#A6826B');
+  const emoji = profile?.emoji || (kid === 'ridley' ? '💃' : '⚡');
+  const name = profile?.name || (kid === 'ridley' ? 'Ridley' : 'Connor');
 
   document.getElementById('kids-pin-icon').textContent = emoji;
   document.getElementById('kids-pin-title').textContent = name;
@@ -5950,7 +5989,9 @@ function resetPin() {
 }
 
 function checkPin() {
-  if (currentKidPin === PINS[selectedKid]) {
+  const profile = kidsStore.profiles[selectedKid];
+  const correctPin = profile?.pin || (selectedKid === 'ridley' ? '1234' : '5678');
+  if (currentKidPin === correctPin) {
     document.getElementById('kids-gate-screen').style.display = 'none';
     enterKidsApp(selectedKid);
   } else {
@@ -5970,18 +6011,28 @@ function enterKidsApp(kid) {
   const app = document.getElementById('kids-app');
   app.style.display = 'flex';
 
-  const color = kid === 'ridley' ? '#5B9BD5' : '#A6826B';
-  const emoji = kid === 'ridley' ? '💃' : '⚽';
+  const profile = kidsStore.profiles[kid];
+  const color = profile?.color || (kid === 'ridley' ? '#5B9BD5' : '#A6826B');
+  const emoji = profile?.emoji || (kid === 'ridley' ? '💃' : '⚡');
+  const name = profile?.name || (kid === 'ridley' ? 'Ridley' : 'Connor');
+  const pts = profile?.points || 0;
 
   document.getElementById('kids-app-emoji').textContent = emoji;
-  document.getElementById('kids-app-name').textContent = kid === 'ridley' ? 'Ridley' : 'Connor';
-  document.getElementById('kids-app-pts-header').textContent = points[kid] + ' pts';
+  document.getElementById('kids-app-name').textContent = name;
+  document.getElementById('kids-app-pts-header').textContent = pts + ' pts';
   document.getElementById('kids-app-pts-header').style.color = color;
   document.getElementById('kids-app-header').style.borderBottomColor = color;
 
-  // Update nav active color
   document.querySelectorAll('.kids-nav-item').forEach(n => {
     n.classList.toggle('connor-nav', kid === 'connor');
+  });
+
+  renderKidsHero(kid);
+  renderKidsChores(kid);
+  renderKidsPrizes(kid);
+  renderTrophy(kid);
+  switchKidsTab('chores');
+}
   });
 
   renderKidsHero(kid);
@@ -6007,7 +6058,7 @@ function switchKidsTab(tab) {
 }
 
 function renderKidsHero(kid) {
-  const pts = points[kid];
+  const pts = kidsPoints(kid);
   // Next small prize milestone = next multiple of 25; next big = next multiple of 100
   const nextSmall = Math.ceil((pts + 1) / 25) * 25;
   const nextBig = Math.ceil((pts + 1) / 100) * 100;
@@ -6042,21 +6093,32 @@ function renderKidsHero(kid) {
 
 function renderKidsChores(kid) {
   const abbr = kid === 'ridley' ? 'r' : 'c';
-  const choreData = kid === 'ridley'
-    ? [{n:'Make bed',p:2,done:true},{n:'Clear dinner table',p:3,done:false},{n:'Tidy bedroom',p:4,done:false},{n:'Feed the dog',p:2,done:false},{n:'Unload dishwasher',p:5,done:false}]
-    : [{n:'Make bed',p:2,done:false},{n:'Clear dinner table',p:3,done:true},{n:'Tidy bedroom',p:4,done:false},{n:'Pack school bag',p:2,done:false}];
+  const kidProfile = kidsStore.profiles[kid];
+  const kidId = kidProfile?.id;
+
+  // Get today's completions for this kid
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCompletions = kidsStore.completions
+    .filter(c => c.kid_id === kidId && c.completed_at?.slice(0, 10) === today)
+    .map(c => c.chore_name);
+
+  // Show positive chores only (negatives are deduct chips)
+  const choreData = kidsStore.chores.filter(c => c.points > 0);
 
   const ptsClass = kid === 'ridley' ? 'pts-ridley' : 'pts-connor';
   const doneClass = kid === 'ridley' ? 'done-r' : 'done-c';
 
   document.getElementById('kids-standalone-chores').innerHTML =
     `<div class="chores-label">Today's chores</div>` +
-    choreData.map(c => `
-      <div class="chore-card ${c.done ? doneClass : ''}" onclick="toggleChore(this,'${abbr}')">
-        <div class="chore-card-check">${c.done ? '✓' : ''}</div>
-        <div class="chore-card-text">${c.n}</div>
-        <div class="chore-card-pts ${ptsClass}">+${c.p}</div>
-      </div>`).join('');
+    choreData.map(c => {
+      const done = todayCompletions.includes(c.name);
+      return `
+        <div class="chore-card ${done ? doneClass : ''}" onclick="toggleChore(this,'${abbr}')" data-chore-id="${c.id}" data-chore-name="${c.name.replace(/"/g,'&quot;')}">
+          <div class="chore-card-check">${done ? '✓' : ''}</div>
+          <div class="chore-card-text">${c.emoji} ${c.name}</div>
+          <div class="chore-card-pts ${ptsClass}">+${c.points}</div>
+        </div>`;
+    }).join('');
 }
 
 // Deduct-points actions — parent-only, lives in parent management next to each
@@ -6092,35 +6154,76 @@ function showKidsToast(text) {
 }
 
 function renderKidsPrizes(kid) {
-  const pool = prizePool[kid];
   const color = kid === 'ridley' ? 'ridley' : 'connor';
+  const pts = kidsPoints(kid);
 
-  document.getElementById('kids-small-prizes-list').innerHTML = pool.small.map(p => {
-    const parts = p.split(' '); const emoji = parts[0]; const name = parts.slice(1).join(' ');
-    return `<div class="prize-list-item" onclick="redeemPrize('${kid}','small')">
-      <span style="font-size:26px;">${emoji}</span>
-      <div style="flex:1;"><div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">25 pts</div></div>
+  const renderPrize = (p, size) => `
+    <div class="prize-list-item" onclick="redeemPrize('${kid}','${size}','${p.id}','${p.name.replace(/'/g,"\\'")}')">
+      <span style="font-size:26px;">${p.name.match(/^\p{Emoji}/u)?.[0] || '🎁'}</span>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:700;color:var(--text);">${p.name.replace(/^\p{Emoji}\s*/u, '')}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${size === 'small' ? '25 pts' : '100 pts'}</div>
+      </div>
       <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:20px;background:var(--${color}-bg);color:var(--${color});border:1.5px solid var(--${color}-border);">Redeem</span>
     </div>`;
-  }).join('');
 
-  document.getElementById('kids-big-prizes-list').innerHTML = pool.big.map(p => {
-    const parts = p.split(' '); const emoji = parts[0]; const name = parts.slice(1).join(' ');
-    return `<div class="prize-list-item" onclick="redeemPrize('${kid}','big')" style="border-color:var(--${color}-border);background:var(--${color}-bg);">
-      <span style="font-size:26px;">${emoji}</span>
-      <div style="flex:1;"><div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">100 pts</div></div>
-      <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:20px;background:var(--${color});color:white;">Redeem</span>
-    </div>`;
-  }).join('');
+  document.getElementById('kids-small-prizes-list').innerHTML =
+    kidsPrizePool('small').map(p => renderPrize(p, 'small')).join('') ||
+    '<div style="color:var(--text3);font-size:12px;padding:12px;">No small prizes set up yet</div>';
+
+  document.getElementById('kids-big-prizes-list').innerHTML =
+    kidsPrizePool('big').map(p => renderPrize(p, 'big')).join('') ||
+    '<div style="color:var(--text3);font-size:12px;padding:12px;">No big prizes set up yet</div>';
 }
 
 function renderTrophy(kid) {
-  const list = trophies[kid];
+  const kidProfile = kidsStore.profiles[kid];
+  const kidId = kidProfile?.id;
+  const list = kidsStore.redemptions.filter(r => r.kid_id === kidId);
+
   const wallEl = document.getElementById('kids-trophy-list');
   const empty = document.getElementById('kids-trophy-empty');
   const statsEl = document.getElementById('kids-trophy-stats');
-  const colorClass = kid === 'ridley' ? 'ridley-badge' : 'connor-badge';
   const colorVar = kid === 'ridley' ? 'var(--ridley)' : 'var(--connor)';
+  const colorClass = kid === 'ridley' ? 'ridley-badge' : 'connor-badge';
+
+  if (!list || list.length === 0) {
+    wallEl.innerHTML = '';
+    statsEl.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  const bigCount = list.filter(r => {
+    const prize = kidsStore.prizes.big.find(p => p.id === r.prize_id);
+    return prize || r.prize_name?.includes('big');
+  }).length;
+  const smallCount = list.length - bigCount;
+
+  statsEl.innerHTML = `
+    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${list.length}</div><div class="trophy-stat-label">Medals earned</div></div>
+    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${bigCount}</div><div class="trophy-stat-label">Gold medals</div></div>
+    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${smallCount}</div><div class="trophy-stat-label">Bronze medals</div></div>`;
+
+  wallEl.innerHTML = list.map(r => {
+    const name = r.prize_name || 'Prize';
+    const emoji = name.match(/^\p{Emoji}/u)?.[0] || '🏆';
+    const label = name.replace(/^\p{Emoji}\s*/u, '');
+    const dateStr = r.redeemed_at
+      ? new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : '';
+    return `
+      <div class="trophy-badge ${colorClass} size-small">
+        <div class="trophy-ribbon-wrap">
+          <div class="trophy-emoji">${emoji}</div>
+        </div>
+        <div class="trophy-name">${label}</div>
+        <div class="trophy-date">${dateStr}</div>
+      </div>`;
+  }).join('');
+}
 
   if (!list || list.length === 0) {
     wallEl.innerHTML = '';
@@ -8543,19 +8646,28 @@ function switchParentTab(tab) {
   if (switcher) switcher.style.display = (tab === 'challenges') ? 'none' : 'flex';
 }
 
-function adjustPoints(kid, amount) {
-  points[kid] = Math.max(0, points[kid] + amount);
-  const pts = points[kid];
+async function adjustPoints(kid, amount) {
+  const profile = kidsStore.profiles[kid];
+  if (!profile) return;
+  const newPts = Math.max(0, profile.points + amount);
+  profile.points = newPts;
 
+  if (isSupabaseReady()) {
+    await _supabase.from('kids_profiles').update({ points: newPts }).eq('id', profile.id);
+  }
+
+  // Update all point displays
   const bigEl = document.getElementById('p-' + kid + '-pts-big');
-  if (bigEl) bigEl.textContent = pts;
-  document.getElementById('parent-' + kid + '-pts').textContent = pts + ' pts';
+  if (bigEl) bigEl.textContent = newPts;
+  const parentEl = document.getElementById('parent-' + kid + '-pts');
+  if (parentEl) parentEl.textContent = newPts + ' pts';
+  const headerEl = document.getElementById('kids-app-pts-header');
+  if (headerEl && selectedKid === kid) headerEl.textContent = newPts + ' pts';
 
-  // Recompute progress toward small (every 25) and big (every 100) prizes
-  const nextSmall = Math.ceil((pts + 1) / 25) * 25;
-  const nextBig = Math.ceil((pts + 1) / 100) * 100;
-  const remainingSmall = nextSmall - pts;
-  const pct = Math.min(100, Math.round((pts / nextSmall) * 100));
+  const nextSmall = Math.ceil((newPts + 1) / 25) * 25;
+  const nextBig = Math.ceil((newPts + 1) / 100) * 100;
+  const remainingSmall = nextSmall - newPts;
+  const pct = Math.min(100, Math.round((newPts / nextSmall) * 100));
 
   const remEl = document.getElementById('p-' + kid + '-remaining');
   const fracEl = document.getElementById('p-' + kid + '-frac');
@@ -8563,14 +8675,11 @@ function adjustPoints(kid, amount) {
   const barEl = document.getElementById('p-' + kid + '-bar');
 
   if (remEl) remEl.textContent = remainingSmall > 0 ? remainingSmall + ' pts to small prize' : 'Small prize ready!';
-  if (fracEl) fracEl.textContent = `${pts} / ${nextSmall}`;
-  if (bigLabelEl) bigLabelEl.textContent = `${nextBig - pts} pts to big prize (every 100)`;
+  if (fracEl) fracEl.textContent = `${newPts} / ${nextSmall}`;
+  if (bigLabelEl) bigLabelEl.textContent = `${nextBig - newPts} pts to big prize (every 100)`;
   if (barEl) barEl.style.width = pct + '%';
 
-  // If kid is currently in standalone app, refresh their hero too
   if (selectedKid === kid) renderKidsHero(kid);
-
-  // Earning points (not deductions) counts toward any active head-to-head challenge
   if (amount > 0) updateChallengeProgress(kid, amount);
 }
 
@@ -8665,7 +8774,7 @@ function choreScheduleLabel() {
   return choreFreqLabels[freq] || 'Daily';
 }
 
-function saveChore() {
+async function saveChore() {
   const name = document.getElementById('chore-name-input').value.trim();
   const pts = parseInt(document.getElementById('chore-pts-input').value) || 2;
   if (!name || !choreSheetKid) return closeChoreSheet();
@@ -8678,17 +8787,45 @@ function saveChore() {
 
   const kid = choreSheetKid;
   const schedLabel = choreScheduleLabel();
+
+  // Save to Supabase
+  let newChore = null;
+  if (isSupabaseReady()) {
+    const { data } = await _supabase.from('chores').insert({
+      owner_id: JASON_UID,
+      name,
+      emoji: '⭐',
+      points: pts,
+      type: choreSheetType,
+      freq: choreSheetType === 'behaviour' ? 'anytime' : freq,
+      days: choreSheetDays.length ? choreSheetDays : null,
+      active: true,
+    }).select().single();
+    newChore = data;
+    if (newChore) kidsStore.chores.push(newChore);
+  }
+
+  // Update parent UI
   const list = document.getElementById('parent-' + kid + '-chores-list');
-  const row = document.createElement('div');
-  row.className = 'parent-chore-row';
-  row.innerHTML = `<span class="parent-chore-sched">${schedLabel}</span><span class="parent-chore-name">${name.replace(/</g,'&lt;')}</span><span class="parent-chore-pts">+${pts} pts</span><button class="parent-chore-del" onclick="removeChore(this,'${kid}')">✕</button>`;
-  list.appendChild(row);
+  if (list) {
+    const row = document.createElement('div');
+    row.className = 'parent-chore-row';
+    row.dataset.choreId = newChore?.id || '';
+    row.innerHTML = `<span class="parent-chore-sched">${schedLabel}</span><span class="parent-chore-name">${name.replace(/</g,'&lt;')}</span><span class="parent-chore-pts">+${pts} pts</span><button class="parent-chore-del" onclick="removeChore(this,'${kid}')">✕</button>`;
+    list.appendChild(row);
+  }
 
   closeChoreSheet();
 }
 
-function removeChore(btn, kid) {
-  btn.closest('.parent-chore-row').remove();
+async function removeChore(btn, kid) {
+  const row = btn.closest('.parent-chore-row');
+  const choreId = row?.dataset.choreId;
+  if (choreId && isSupabaseReady()) {
+    await _supabase.from('chores').update({ active: false }).eq('id', choreId);
+    kidsStore.chores = kidsStore.chores.filter(c => c.id !== choreId);
+  }
+  row?.remove();
 }
 
 // ═══════════════════════════════════════════
@@ -8793,25 +8930,42 @@ function renderStreakBadge(kid, wrapId) {
   wrap.innerHTML = `<span class="streak-badge">🔥 ${days} day streak${hint}</span>`;
 }
 
-function addPrize(kid, size) {
+async function addPrize(kid, size) {
   const input = document.getElementById('new-prize-' + kid + '-' + size);
   const text = input.value.trim();
   if (!text) return;
+
+  let newPrize = null;
+  if (isSupabaseReady()) {
+    const { data } = await _supabase.from('prizes').insert({
+      owner_id: JASON_UID,
+      name: text,
+      size,
+      active: true,
+    }).select().single();
+    newPrize = data;
+    if (newPrize) kidsStore.prizes[size].push(newPrize);
+  }
+
   const poolEl = document.getElementById('parent-' + kid + '-' + size + '-pool');
-  const row = document.createElement('div');
-  row.className = 'parent-chore-row';
-  row.innerHTML = `<span class="parent-chore-name">${text}</span><button class="parent-chore-del" onclick="removePrize(this,'${kid}','${size}')">✕</button>`;
-  poolEl.appendChild(row);
-  // Also add to runtime prize pool
-  prizePool[kid][size].push(text);
+  if (poolEl) {
+    const row = document.createElement('div');
+    row.className = 'parent-chore-row';
+    row.dataset.prizeId = newPrize?.id || '';
+    row.innerHTML = `<span class="parent-chore-name">${text}</span><button class="parent-chore-del" onclick="removePrize(this,'${kid}','${size}')">✕</button>`;
+    poolEl.appendChild(row);
+  }
   input.value = '';
 }
 
-function removePrize(btn, kid, size) {
+async function removePrize(btn, kid, size) {
   const row = btn.closest('.parent-chore-row');
-  const name = row.querySelector('.parent-chore-name').textContent;
-  prizePool[kid][size] = prizePool[kid][size].filter(p => p !== name);
-  row.remove();
+  const prizeId = row?.dataset.prizeId;
+  if (prizeId && isSupabaseReady()) {
+    await _supabase.from('prizes').update({ active: false }).eq('id', prizeId);
+    kidsStore.prizes[size] = kidsStore.prizes[size].filter(p => p.id !== prizeId);
+  }
+  row?.remove();
 }
 
 function markUsed(el) {
@@ -8824,35 +8978,66 @@ function markUsed(el) {
 // ═══════════════════════════════════════════
 //  CHORE TOGGLE (shared)
 // ═══════════════════════════════════════════
-function toggleChore(card, kidAbbr) {
+async function toggleChore(card, kidAbbr) {
   const kid = kidAbbr === 'r' ? 'ridley' : 'connor';
   const doneClass = kidAbbr === 'r' ? 'done-r' : 'done-c';
   const isDone = card.classList.contains(doneClass);
   const check = card.querySelector('.chore-card-check');
   const ptsEl = card.querySelector('.chore-card-pts');
   const pts = ptsEl ? parseInt(ptsEl.textContent.replace('+', '')) || 0 : 0;
+  const choreName = card.dataset.choreName || '';
+  const choreId = card.dataset.choreId || null;
+  const kidProfile = kidsStore.profiles[kid];
 
   if (isDone) {
     card.classList.remove(doneClass);
     check.textContent = '';
-    adjustPoints(kid, -pts); // undo
+    await adjustPoints(kid, -pts);
+    // Remove from local completions
+    kidsStore.completions = kidsStore.completions.filter(
+      c => !(c.kid_id === kidProfile?.id && c.chore_name === choreName &&
+             c.completed_at?.slice(0, 10) === new Date().toISOString().slice(0, 10))
+    );
   } else {
     card.classList.add(doneClass);
     check.textContent = '✓';
-    adjustPoints(kid, pts);
+    await adjustPoints(kid, pts);
+    // Log to Supabase
+    if (isSupabaseReady() && kidProfile) {
+      const { data } = await _supabase.from('chore_completions').insert({
+        owner_id: JASON_UID,
+        chore_id: choreId || null,
+        kid_id: kidProfile.id,
+        chore_name: choreName,
+        points: pts,
+        logged_by: selectedKid ? 'kid' : 'parent',
+      }).select().single();
+      if (data) kidsStore.completions.unshift(data);
+    }
+    showKidsToast(`+${pts} pts — ${choreName}`);
   }
 }
 
 // ═══════════════════════════════════════════
 //  PRIZE REVEAL
 // ═══════════════════════════════════════════
-function redeemPrize(kid, size) {
-  const pool = prizePool[kid][size];
+async function redeemPrize(kid, size, prizeId, prizeName) {
+  const pool = kidsPrizePool(size);
   if (!pool.length) return;
-  const prize = pool[Math.floor(Math.random() * pool.length)];
-  const parts = prize.split(' ');
-  const emoji = parts[0];
-  const text = parts.slice(1).join(' ');
+
+  // Pick random prize if not specified
+  let prize, name;
+  if (prizeId && prizeName) {
+    name = prizeName;
+    prize = pool.find(p => p.id === prizeId) || pool[Math.floor(Math.random() * pool.length)];
+  } else {
+    prize = pool[Math.floor(Math.random() * pool.length)];
+    name = prize.name;
+  }
+
+  const emoji = name.match(/^\p{Emoji}/u)?.[0] || '🎁';
+  const text = name.replace(/^\p{Emoji}\s*/u, '');
+  const kidProfile = kidsStore.profiles[kid];
 
   document.getElementById('prize-emoji').textContent = emoji;
   document.getElementById('prize-title').textContent = size === 'big' ? '🎉 Big prize!' : 'You earned it!';
@@ -8860,8 +9045,17 @@ function redeemPrize(kid, size) {
   document.getElementById('prize-close-btn').style.background =
     kid === 'ridley' ? 'var(--ridley)' : 'var(--connor)';
 
-  // Add to trophy collection
-  trophies[kid].unshift({ emoji, name: text, date: 'Today', size });
+  // Save to Supabase
+  if (isSupabaseReady() && kidProfile) {
+    const { data } = await _supabase.from('prize_redemptions').insert({
+      owner_id: JASON_UID,
+      prize_id: prize?.id || null,
+      kid_id: kidProfile.id,
+      prize_name: name,
+      points_spent: size === 'big' ? 100 : 25,
+    }).select().single();
+    if (data) kidsStore.redemptions.unshift(data);
+  }
 
   document.getElementById('prize-modal').classList.add('show');
   launchConfetti(kid);
