@@ -5819,17 +5819,15 @@ function renderAllTasks(user, filter) {
   const listEl = document.getElementById(user + '-all-tasks-list');
   if (!listEl) return;
 
-  const allTasks = collectTasksFromDOM(user);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayPickIds = new Set((loadTodayPicks(user) || []).map(id => id));
 
-  // Apply filter
-  const filtered = allTasks.filter(t => {
+  // Apply filter against taskStore
+  const filtered = taskStore.filter(t => {
     if (filter === 'all') return true;
-    if (filter === 'active') return !t.done;
-    if (filter === 'done') return t.done;
-    if (filter === 'matters') return t.mattersNow && !t.done;
-    if (filter === 'work') return !t.done && !['home','appt','shared'].includes(t.badge);
-    if (filter === 'home') return !t.done && ['home','appt'].includes(t.badge);
-    if (filter === 'shared') return t.shared && !t.done;
+    if (filter === 'matters') return t.matters_now;
+    if (filter === 'due') return t.next_due && t.next_due <= today;
+    if (filter === 'work') return t.category_id !== null; // rough proxy until categories wired
     return true;
   });
 
@@ -5838,30 +5836,45 @@ function renderAllTasks(user, filter) {
     return;
   }
 
-  // Group: Today first, Later second, Done last
+  // Group: Today's picks first, then rest sorted by due date
+  const todayItems = filtered.filter(t => todayPickIds.has(t.id));
+  const otherItems = filtered.filter(t => !todayPickIds.has(t.id));
+
   const groups = [
-    { key: 'today', label: 'Today', items: filtered.filter(t => t.placement === 'today' && !t.done) },
-    { key: 'later', label: 'Later', items: filtered.filter(t => t.placement === 'later' && !t.done) },
-    { key: 'done', label: 'Done', items: filtered.filter(t => t.done) },
+    { label: 'Today', items: todayItems },
+    { label: 'Everything else', items: otherItems },
   ].filter(g => g.items.length > 0);
 
   listEl.innerHTML = groups.map(g => `
     <div class="all-tasks-section-header">${g.label}</div>
     ${g.items.map(t => `
-      <div class="all-task-row ${t.done ? 'done-row' : ''}" onclick="scrollToTask('${user}', this, '${t.placement}')">
-        <div class="all-task-check ${t.done ? 'checked' : ''}" onclick="event.stopPropagation(); toggleAllTaskItem(this)">
-          ${t.done ? '<svg width="9" height="9" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>' : ''}
-        </div>
+      <div class="all-task-row" data-task-id="${t.id}">
+        <div class="all-task-check" onclick="event.stopPropagation(); toggleTaskFromAll(this, '${t.id}')"></div>
         <div class="all-task-info">
-          <div class="all-task-title">${t.text.replace(/</g,'&lt;')}</div>
+          <div class="all-task-title">${t.title.replace(/</g,'&lt;')}</div>
           <div class="all-task-meta">
-            ${t.badge ? `<span class="all-task-pill">${t.badge}</span>` : ''}
-            ${t.mattersNow ? `<span class="all-task-pill due-soon">Urgent</span>` : ''}
+            ${t.next_due ? `<span class="all-task-pill ${t.next_due <= today ? 'due-soon' : ''}">${new Date(t.next_due).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>` : ''}
+            ${t.matters_now ? `<span class="all-task-pill due-soon">⭐ Urgent</span>` : ''}
           </div>
         </div>
-        ${t.mattersNow ? '<span class="all-task-flag">⭐</span>' : ''}
       </div>`).join('')}
   `).join('');
+}
+
+async function toggleTaskFromAll(checkEl, taskId) {
+  checkEl.classList.add('checked');
+  checkEl.innerHTML = '<svg width="9" height="9" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+  const row = checkEl.closest('.all-task-row');
+  row.style.opacity = '0.4';
+  row.querySelector('.all-task-title').style.textDecoration = 'line-through';
+
+  // Mark done in Supabase
+  if (isSupabaseReady()) {
+    await _supabase.from('tasks').update({ done: true }).eq('id', taskId);
+  }
+  // Remove from taskStore
+  taskStore = taskStore.filter(t => t.id !== taskId);
+  setTimeout(() => row.remove(), 600);
 }
 
 function filterAllTasks(user, chip, filter) {
