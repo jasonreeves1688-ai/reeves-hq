@@ -2876,6 +2876,35 @@ html, body {
   white-space: nowrap;
 }
 
+/* Due date + people badges — compact glance info on task rows */
+.task-due-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: var(--surface2);
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+.task-due-badge.due-soon {
+  background: rgba(201,162,39,0.12);
+  color: #C9A227;
+  border-color: rgba(201,162,39,0.3);
+}
+.task-people-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: var(--jenny-bg);
+  color: var(--jenny);
+  border: 1px solid var(--jenny-border);
+}
+
 .desc-toggle {
 
   font-size: 12px;
@@ -5953,6 +5982,53 @@ if (isSupabaseReady()) {
 // ── Task store — populated from Supabase ─────────────────────────
 let taskStore = []; // all active tasks for current user
 
+// ── Task-level "at a glance" info: due date + linked people ───────
+let taskPeopleMap = {}; // taskId -> [{id, name}]
+
+async function loadTaskPeopleLinks(taskIds) {
+  taskPeopleMap = {};
+  if (!isSupabaseReady() || !taskIds.length) return;
+  const { data, error } = await _supabase.from('task_people').select('task_id, person_id').in('task_id', taskIds);
+  if (error) { console.warn('[TaskPeople] Load failed:', error.message); return; }
+  if (!data || !data.length) return;
+
+  const personIds = [...new Set(data.map(r => r.person_id))];
+  const nameById = {};
+  (typeof peopleData !== 'undefined' ? peopleData : []).forEach(p => { nameById[p.id] = p.name; });
+  const missingIds = personIds.filter(id => !nameById[id]);
+  if (missingIds.length) {
+    const { data: people } = await _supabase.from('unified_people').select('id,name').in('id', missingIds);
+    (people || []).forEach(p => { nameById[p.id] = p.name; });
+  }
+
+  data.forEach(r => {
+    if (!taskPeopleMap[r.task_id]) taskPeopleMap[r.task_id] = [];
+    taskPeopleMap[r.task_id].push({ id: r.person_id, name: nameById[r.person_id] || 'Unknown' });
+  });
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// Small "at a glance" badge for a task's due date — only rendered when a date exists
+function taskDueBadgeHtml(dueDateStr) {
+  if (!dueDateStr) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  const isSoon = dueDateStr <= today;
+  return `<span class="task-due-badge${isSoon ? ' due-soon' : ''}">${formatShortDate(dueDateStr)}</span>`;
+}
+
+// Small "at a glance" badge for linked people — collapses to "Name +N" when there's more than one
+function taskPeopleBadgeHtml(people) {
+  if (!people || !people.length) return '';
+  const label = people.length === 1 ? people[0].name : `${people[0].name} +${people.length - 1}`;
+  const titleAttr = people.map(p => p.name).join(', ').replace(/"/g, '&quot;');
+  return `<span class="task-people-badge" title="${titleAttr}">${label.replace(/</g, '&lt;')}</span>`;
+}
+
 async function loadTasks(user) {
   if (!isSupabaseReady()) return;
   const uid = user === 'jason' ? JASON_UID : JENNY_UID;
@@ -5961,9 +6037,11 @@ async function loadTasks(user) {
     .select('*')
     .eq('owner_id', uid)
     .eq('done', false)
-    .order('next_due', { ascending: true, nullsFirst: false });
+    .order('next_due', { ascending: true, nullsFirst: false })
+    .order('due_date', { ascending: true, nullsFirst: false });
   if (error) { console.warn('[Tasks] Load failed:', error.message); return; }
   taskStore = data || [];
+  await loadTaskPeopleLinks(taskStore.map(t => t.id));
 
   // Render into the All Tasks tab (not Today's pick list)
   const listId = user === 'jenny' ? 'jenny-all-tasks-list' : 'jason-all-tasks-list';
@@ -5980,12 +6058,24 @@ function renderTaskRow(task, list) {
   div.className = 'task-row';
   div.dataset.taskId = task.id;
   if (task.matters_now) div.dataset.mattersNow = 'true';
+  if (task.recur_pattern) {
+    div.dataset.recurPattern = task.recur_pattern;
+    div.dataset.recurInterval = task.recur_interval ?? '';
+    div.dataset.recurWeekDay = task.recur_week_day ?? '';
+    div.dataset.recurMonthDay = task.recur_month_day ?? '';
+  }
   div.onclick = () => toggleTask(div);
   const flagHtml = task.matters_now ? '<span class="task-row-flag">⭐</span>' : '';
+  const recurBadgeHtml = task.recur_pattern ? `<span class="recur-badge">↻</span>` : '';
+  const dueBadgeHtml = taskDueBadgeHtml(task.next_due || task.due_date);
+  const peopleBadgeHtml = taskPeopleBadgeHtml(taskPeopleMap[task.id]);
+  const sharedBadgeHtml = task.visibility === 'shared'
+    ? '<span class="task-badge" style="background:var(--jenny-bg);color:var(--jenny);border:1px solid var(--jenny-border);">shared</span>' : '';
   div.innerHTML = `
     <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
     ${flagHtml}
     <div class="task-text">${task.title.replace(/</g,'&lt;')}</div>
+    ${dueBadgeHtml}${recurBadgeHtml}${peopleBadgeHtml}${sharedBadgeHtml}
     <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
     </button>`;
@@ -6226,10 +6316,11 @@ function renderAllTasks(user, filter) {
 
   // Apply filter against taskStore
   const filtered = taskStore.filter(t => {
+    const effectiveDue = t.next_due || t.due_date || null;
     if (filter === 'all' || filter === 'active') return true; // taskStore only has done:false
     if (filter === 'done') return false; // done tasks not in taskStore — show empty
     if (filter === 'matters') return t.matters_now;
-    if (filter === 'due') return t.next_due && t.next_due <= today;
+    if (filter === 'due') return effectiveDue && effectiveDue <= today;
     if (filter === 'work') {
       // Work = has a category (rough proxy until categories fully wired)
       return t.category_id !== null;
@@ -6261,38 +6352,82 @@ function renderAllTasks(user, filter) {
 
   listEl.innerHTML = groups.map(g => `
     <div class="all-tasks-section-header">${g.label}</div>
-    ${g.items.map(t => `
+    ${g.items.map(t => {
+      const effectiveDue = t.next_due || t.due_date || null;
+      const people = taskPeopleMap[t.id];
+      const peoplePillHtml = people && people.length
+        ? `<span class="all-task-pill person">${(people.length === 1 ? people[0].name : `${people[0].name} +${people.length - 1}`).replace(/</g,'&lt;')}</span>`
+        : '';
+      return `
       <div class="all-task-row" data-task-id="${t.id}" onclick="toggleTaskFromAll(this.querySelector('.all-task-check'), '${t.id}')">
         <div class="all-task-check" onclick="event.stopPropagation(); toggleTaskFromAll(this, '${t.id}')"></div>
         <div class="all-task-info">
           <div class="all-task-title">${t.title.replace(/</g,'&lt;')}</div>
           <div class="all-task-meta">
-            ${t.next_due ? `<span class="all-task-pill ${t.next_due <= today ? 'due-soon' : ''}">${new Date(t.next_due).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>` : ''}
+            ${effectiveDue ? `<span class="all-task-pill ${effectiveDue <= today ? 'due-soon' : ''}">${formatShortDate(effectiveDue)}</span>` : ''}
             ${t.matters_now ? `<span class="all-task-pill due-soon">⭐ Urgent</span>` : ''}
             ${t.visibility === 'shared' ? `<span class="all-task-pill">Shared</span>` : ''}
+            ${peoplePillHtml}
           </div>
         </div>
         <button class="task-edit-btn" onclick="event.stopPropagation(); openEditSheetById('${t.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
         </button>
-      </div>`).join('')}
+      </div>`;
+    }).join('')}
   `).join('');
 }
 
 async function toggleTaskFromAll(checkEl, taskId) {
+  const row = checkEl.closest('.all-task-row');
+  if (!row || row.dataset.completing === 'true') return; // guard against double taps
+  row.dataset.completing = 'true';
+
   checkEl.classList.add('checked');
   checkEl.innerHTML = '<svg width="9" height="9" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
-  const row = checkEl.closest('.all-task-row');
   row.style.opacity = '0.4';
   row.querySelector('.all-task-title').style.textDecoration = 'line-through';
 
-  // Mark done in Supabase
+  const storedTask = taskStore.find(t => t.id === taskId);
+  const recurPattern = storedTask?.recur_pattern || null;
+
   if (isSupabaseReady()) {
-    await _supabase.from('tasks').update({ done: true }).eq('id', taskId);
+    if (recurPattern) {
+      // Recurring task — advance next_due instead of marking done forever
+      const nextDue = computeNextDue(
+        recurPattern,
+        storedTask.recur_interval || 3,
+        storedTask.recur_week_day ?? 1,
+        storedTask.recur_month_day || 1
+      );
+      const nextDueStr = nextDue.toISOString().slice(0, 10);
+      const { error } = await _supabase.from('tasks').update({ next_due: nextDueStr, done: false }).eq('id', taskId);
+      if (error) {
+        console.warn('[Tasks] Recurring update failed:', error.message);
+      } else {
+        storedTask.next_due = nextDueStr;
+        storedTask.done = false;
+      }
+    } else {
+      const { error } = await _supabase.from('tasks').update({ done: true }).eq('id', taskId);
+      if (error) console.warn('[Tasks] Update failed:', error.message);
+    }
   }
-  // Remove from taskStore
-  taskStore = taskStore.filter(t => t.id !== taskId);
-  setTimeout(() => row.remove(), 600);
+
+  if (!recurPattern) {
+    // Remove from taskStore — permanently done
+    taskStore = taskStore.filter(t => t.id !== taskId);
+  }
+
+  setTimeout(() => {
+    if (recurPattern) {
+      // Re-render so the task reappears with its advanced due date
+      const activeFilterChip = document.querySelector(`#${currentUser}-all-filter-row .sheet-chip.active`);
+      renderAllTasks(currentUser, activeFilterChip?.dataset.filter || 'all');
+    } else {
+      row.remove();
+    }
+  }, 600);
 }
 
 function filterAllTasks(user, chip, filter) {
@@ -7344,6 +7479,14 @@ async function addTask() {
     ? (parseInt(document.getElementById('recur-monthly-day').value) || sheetRecurMonthDay) : null;
   const recurWeekDay = sheetRecurEnabled && sheetRecurPattern === 'weekly' ? sheetRecurWeekDay : null;
 
+  // Resolve selected people to {id, name} for the at-a-glance badge
+  const peopleSource = (typeof peopleData !== 'undefined' ? peopleData : []) || [];
+  const peopleForPill = sheetSelectedPeople
+    .map(id => ({ id, name: peopleSource.find(p => p.id === id)?.name }))
+    .filter(p => p.name);
+  const dueBadgeHtml = taskDueBadgeHtml(dueDate);
+  const peopleBadgeHtml = taskPeopleBadgeHtml(peopleForPill);
+
   const payload = {
     title: text,
     description,
@@ -7375,6 +7518,17 @@ async function addTask() {
     if (existingRecurBadge) existingRecurBadge.remove();
     if (recurBadgeHtml) textEl.insertAdjacentHTML('afterend', recurBadgeHtml);
 
+    // Refresh the at-a-glance due date + people badges
+    let existingDueBadge = row.querySelector('.task-due-badge');
+    if (existingDueBadge) existingDueBadge.remove();
+    let existingPeopleBadge = row.querySelector('.task-people-badge');
+    if (existingPeopleBadge) existingPeopleBadge.remove();
+    const editBtn = row.querySelector('.task-edit-btn');
+    if (editBtn) {
+      if (peopleBadgeHtml) editBtn.insertAdjacentHTML('beforebegin', peopleBadgeHtml);
+      if (dueBadgeHtml) editBtn.insertAdjacentHTML('beforebegin', dueBadgeHtml);
+    }
+
     if (sheetRecurEnabled) {
       row.dataset.recurPattern = sheetRecurPattern;
       row.dataset.recurInterval = recurInterval ?? '';
@@ -7397,6 +7551,7 @@ async function addTask() {
         if (t) Object.assign(t, payload);
       }
       await syncTaskPeople(taskId, uid, editingTaskOriginalPeople);
+      taskPeopleMap[taskId] = peopleForPill;
     }
 
     editingTaskOriginalPeople = [];
@@ -7425,6 +7580,7 @@ async function addTask() {
       newTaskId = data.id;
       taskStore.push(data);
       await syncTaskPeople(newTaskId, uid, []);
+      taskPeopleMap[newTaskId] = peopleForPill;
     }
   }
 
@@ -7442,7 +7598,7 @@ async function addTask() {
       div.dataset.recurMonthDay = recurMonthDay ?? '';
     }
     div.onclick = () => toggleTask(div);
-    div.innerHTML = `<div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>${flagHtml}<div class="task-text">${text}</div>${recurBadgeHtml}${sharedBadge}<button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>`;
+    div.innerHTML = `<div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>${flagHtml}<div class="task-text">${text}</div>${dueBadgeHtml}${recurBadgeHtml}${peopleBadgeHtml}${sharedBadge}<button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>`;
     if (sheetMattersNow) {
       list.insertBefore(div, list.firstChild);
     } else {
