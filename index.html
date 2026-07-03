@@ -5497,7 +5497,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ── enterApp — called after successful auth ──
-function enterApp(user) {
+async function enterApp(user) {
   currentUser = user;
   document.getElementById('gate-screen').style.display = 'none';
 
@@ -5505,12 +5505,14 @@ function enterApp(user) {
   if (user === 'jason') {
     sub.textContent = 'Jason';
     document.getElementById('nav-people').style.display = 'flex';
-    loadPeople(); // load real people + open items from Supabase
+    loadPeople(); // load people + open items + meetings (non-blocking)
   } else {
     sub.textContent = 'Jenny';
     document.getElementById('nav-people').style.display = 'none';
   }
 
+  // Load tasks first — daily pick needs them to build the pool
+  await loadTasks(user);
   openDailyPick(user);
 }
 
@@ -5547,40 +5549,122 @@ if (isSupabaseReady()) {
 // ═══════════════════════════════════════════
 // Candidate pools — in production these come from the tasks table,
 // ranked by: carryover (was on yesterday's pick, unfinished) > matters now > due today > due soon > everything else
-const dailyPickPools = {
-  jason: [
-    { text: 'Renew passport before trip', reason: 'Carried over from yesterday', tag: 'carryover' },
-    { text: 'Q3 deck review with Sarah', reason: 'Due today · 10am', tag: 'due' },
-    { text: 'Follow up with Marcus re: proposal', reason: 'Matters now', tag: 'matters' },
-    { text: 'Weekly 1:1 with Dev team', reason: 'Due today · 2pm', tag: 'due' },
-    { text: 'Review Q4 budget draft', reason: 'Due tomorrow', tag: 'soon' },
-    { text: "Book Ridley's dance class registration", reason: 'Due today', tag: 'due' },
-    { text: 'Pick up dry cleaning', reason: 'Due today', tag: 'due' },
-    { text: 'Schedule annual eye exam', reason: 'No due date', tag: 'later' },
-    { text: 'Set up 1:1 with new hire', reason: 'No due date', tag: 'later' },
-  ],
-  jenny: [
-    { text: 'Call mom back', reason: 'Carried over from yesterday', tag: 'carryover' },
-    { text: 'School pickup at 3:30', reason: 'Due today · 3:30pm', tag: 'due' },
-    { text: 'Dentist appointment — Connor', reason: 'Due today', tag: 'due' },
-    { text: "Plan next week's dinners", reason: 'Matters now', tag: 'matters' },
-    { text: 'Order birthday gift for niece', reason: 'Due tomorrow', tag: 'soon' },
-    { text: 'Return library books', reason: 'No due date', tag: 'later' },
-    { text: 'Sign permission slip', reason: 'Due today', tag: 'due' },
-    { text: 'Tidy playroom', reason: 'No due date', tag: 'later' },
-  ]
-};
+// ── Task store — populated from Supabase ─────────────────────────
+let taskStore = []; // all active tasks for current user
 
-const dailyPickRank = { carryover: 0, matters: 1, due: 2, soon: 3, later: 4 };
+async function loadTasks(user) {
+  if (!isSupabaseReady()) return;
+  const uid = user === 'jason' ? JASON_UID : JENNY_UID;
+  const { data, error } = await _supabase
+    .from('tasks')
+    .select('*')
+    .eq('owner_id', uid)
+    .eq('done', false)
+    .order('next_due', { ascending: true, nullsFirst: false });
+  if (error) { console.warn('[Tasks] Load failed:', error.message); return; }
+  taskStore = data || [];
+
+  // Render into the All Tasks tab (not Today's pick list)
+  const listId = user === 'jenny' ? 'jenny-all-tasks-list' : 'jason-all-tasks-list';
+  const list = document.getElementById(listId);
+  if (list) {
+    list.innerHTML = '';
+    taskStore.forEach(task => renderTaskRow(task, list));
+    sortMattersNowToTop(list);
+  }
+}
+
+function renderTaskRow(task, list) {
+  const div = document.createElement('div');
+  div.className = 'task-row';
+  div.dataset.taskId = task.id;
+  if (task.matters_now) div.dataset.mattersNow = 'true';
+  div.onclick = () => toggleTask(div);
+  const flagHtml = task.matters_now ? '<span class="task-row-flag">⭐</span>' : '';
+  div.innerHTML = `
+    <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
+    ${flagHtml}
+    <div class="task-text">${task.title.replace(/</g,'&lt;')}</div>
+    <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+    </button>`;
+  list.appendChild(div);
+}
+
+// ── Build daily pick pool from real tasks ─────────────────────────
+function buildPickPool(user) {
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+
+  return taskStore.map(task => {
+    let tag, reason;
+    if (task.matters_now) {
+      tag = 'matters'; reason = 'Matters now';
+    } else if (task.next_due && task.next_due <= today) {
+      tag = 'due'; reason = 'Due today';
+    } else if (task.next_due === tomorrow) {
+      tag = 'soon'; reason = 'Due tomorrow';
+    } else if (task.next_due) {
+      const d = new Date(task.next_due);
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      tag = 'soon'; reason = `Due ${label}`;
+    } else {
+      tag = 'later'; reason = 'No due date';
+    }
+    return { id: task.id, text: task.title, reason, tag };
+  }).sort((a, b) => {
+    const rank = { matters: 0, due: 1, soon: 2, later: 3 };
+    return (rank[a.tag] ?? 4) - (rank[b.tag] ?? 4);
+  });
+}
+
+// ── Daily pick — with persistence across sessions ─────────────────
+const PICK_STORAGE_KEY = 'reeves-daily-pick';
+
+function getTodayPickKey(user) {
+  const today = new Date().toISOString().slice(0, 10);
+  return `${PICK_STORAGE_KEY}-${user}-${today}`;
+}
+
+function saveTodayPicks(user, selectedIds) {
+  try {
+    localStorage.setItem(getTodayPickKey(user), JSON.stringify(selectedIds));
+  } catch (e) { console.warn('[DailyPick] Could not save picks:', e); }
+}
+
+function loadTodayPicks(user) {
+  try {
+    const raw = localStorage.getItem(getTodayPickKey(user));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+const dailyPickRank = { matters: 0, due: 1, soon: 2, later: 3 };
 let dailyPickSelected = [];
+let dailyPickPool = [];
 
 function openDailyPick(user) {
+  // Check if user already picked today
+  const savedIds = loadTodayPicks(user);
+  if (savedIds && savedIds.length > 0 && taskStore.length > 0) {
+    // Restore picks from saved IDs and skip the picker
+    const savedTasks = savedIds
+      .map(id => taskStore.find(t => t.id === id))
+      .filter(Boolean);
+    if (savedTasks.length > 0) {
+      dailyPickSelected = savedTasks.map(t => ({ id: t.id, text: t.title, tag: t.matters_now ? 'matters' : 'due' }));
+      renderTodayFromPicks(user, dailyPickSelected);
+      return;
+    }
+  }
+
+  // Build pool from real tasks
   dailyPickSelected = [];
-  const pool = (dailyPickPools[user] || []).slice().sort((a, b) => dailyPickRank[a.tag] - dailyPickRank[b.tag]);
+  dailyPickPool = buildPickPool(user);
 
   const list = document.getElementById('pick-list');
   list.innerHTML = '';
-  pool.forEach((item, i) => {
+  dailyPickPool.forEach((item, i) => {
     const row = document.createElement('div');
     row.className = 'pick-row';
     row.dataset.index = i;
@@ -5588,8 +5672,8 @@ function openDailyPick(user) {
     row.innerHTML = `
       <div class="pick-checkbox"></div>
       <div class="pick-info">
-        <div class="pick-text">${item.text}</div>
-        <div class="pick-reason ${item.tag === 'carryover' ? 'carryover' : item.tag === 'matters' ? 'matters' : ''}">${item.reason}</div>
+        <div class="pick-text">${item.text.replace(/</g,'&lt;')}</div>
+        <div class="pick-reason ${item.tag === 'matters' ? 'matters' : item.tag === 'due' ? '' : ''}">${item.reason}</div>
       </div>
       ${flag}`;
     row.onclick = () => toggleDailyPickItem(row, item);
@@ -5630,19 +5714,22 @@ function updatePickFooter() {
   });
 }
 
-function confirmDailyPick() {
-  const who = currentUser;
+function renderTodayFromPicks(who, picks) {
   const listId = who === 'jenny' ? 'tasks-list-jenny' : 'tasks-list';
   const list = document.getElementById(listId);
-  list.innerHTML = '';
-
-  dailyPickSelected.forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'task-row';
-    div.onclick = () => toggleTask(div);
-    const flagHtml = item.tag === 'matters' ? '<span class="task-row-flag">⭐</span>' : '';
-    div.innerHTML = `<div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>${flagHtml}<div class="task-text">${item.text}</div><button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>`;
-    list.appendChild(div);
+  picks.forEach(item => {
+    const task = taskStore.find(t => t.id === item.id);
+    if (task) {
+      renderTaskRow(task, list);
+    } else {
+      // Fallback for items not in taskStore (e.g. demo or deleted)
+      const div = document.createElement('div');
+      div.className = 'task-row';
+      div.onclick = () => toggleTask(div);
+      const flagHtml = item.tag === 'matters' ? '<span class="task-row-flag">⭐</span>' : '';
+      div.innerHTML = `<div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>${flagHtml}<div class="task-text">${item.text.replace(/</g,'&lt;')}</div><button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>`;
+      list.appendChild(div);
+    }
   });
   sortMattersNowToTop(list);
 
@@ -5651,14 +5738,20 @@ function confirmDailyPick() {
   document.getElementById('fab-btn').style.display = 'flex';
   showTodayFor(who);
 
-  // Update the "X things on your list" meta line
-  const metaText = `${dailyPickSelected.length} thing${dailyPickSelected.length === 1 ? '' : 's'} on your list today`;
+  const metaText = `${picks.length} thing${picks.length === 1 ? '' : 's'} on your list today`;
   if (who === 'jason') {
     document.getElementById('today-meta').textContent = metaText;
   } else {
     const metaEl = document.querySelector('#screen-today-jenny .today-meta');
     if (metaEl) metaEl.textContent = metaText;
   }
+}
+
+function confirmDailyPick() {
+  const who = currentUser;
+  // Save selected task IDs to localStorage so they persist today
+  saveTodayPicks(who, dailyPickSelected.map(i => i.id).filter(Boolean));
+  renderTodayFromPicks(who, dailyPickSelected);
 }
 
 function showTodayFor(user) {
