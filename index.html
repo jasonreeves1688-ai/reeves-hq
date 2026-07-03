@@ -5848,7 +5848,7 @@ function renderAllTasks(user, filter) {
   listEl.innerHTML = groups.map(g => `
     <div class="all-tasks-section-header">${g.label}</div>
     ${g.items.map(t => `
-      <div class="all-task-row" data-task-id="${t.id}">
+      <div class="all-task-row" data-task-id="${t.id}" onclick="toggleTaskFromAll(this.querySelector('.all-task-check'), '${t.id}')">
         <div class="all-task-check" onclick="event.stopPropagation(); toggleTaskFromAll(this, '${t.id}')"></div>
         <div class="all-task-info">
           <div class="all-task-title">${t.title.replace(/</g,'&lt;')}</div>
@@ -5857,6 +5857,9 @@ function renderAllTasks(user, filter) {
             ${t.matters_now ? `<span class="all-task-pill due-soon">⭐ Urgent</span>` : ''}
           </div>
         </div>
+        <button class="task-edit-btn" onclick="event.stopPropagation(); openEditSheetById('${t.id}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </button>
       </div>`).join('')}
   `).join('');
 }
@@ -6200,7 +6203,7 @@ function toggleTheme() {
 // ═══════════════════════════════════════════
 //  TASKS
 // ═══════════════════════════════════════════
-function toggleTask(row) {
+async function toggleTask(row) {
   row.classList.toggle('done');
   const justCompleted = row.classList.contains('done');
   const check = row.querySelector('.task-check');
@@ -6208,6 +6211,15 @@ function toggleTask(row) {
   check.innerHTML = check.classList.contains('checked')
     ? '<svg width="10" height="10" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>'
     : '';
+
+  // Save to Supabase
+  const taskId = row.dataset.taskId;
+  if (taskId && isSupabaseReady()) {
+    await _supabase.from('tasks').update({ done: justCompleted }).eq('id', taskId);
+    if (justCompleted) {
+      taskStore = taskStore.filter(t => t.id !== taskId);
+    }
+  }
 
   // Personal rewards only accrue from Jason's own task list, not Jenny's
   if (justCompleted && row.closest('#tasks-list')) {
@@ -6683,6 +6695,29 @@ function addTask() {
 // ═══════════════════════════════════════════
 //  EDIT TASK SHEET — long-press / edit-button entry
 // ═══════════════════════════════════════════
+function openEditSheetById(taskId) {
+  // First check if the row exists in the Today DOM
+  let row = document.querySelector(`.task-row[data-task-id="${taskId}"]`);
+
+  if (!row) {
+    // Create a synthetic row from taskStore so edit sheet has something to work with
+    const task = taskStore.find(t => t.id === taskId);
+    if (!task) return;
+    row = document.createElement('div');
+    row.className = 'task-row';
+    row.dataset.taskId = task.id;
+    if (task.matters_now) {
+      row.innerHTML = `<span class="task-row-flag">⭐</span><div class="task-text">${task.title}</div>`;
+    } else {
+      row.innerHTML = `<div class="task-text">${task.title}</div>`;
+    }
+    // Mark as synthetic so we know to refresh All Tasks after edit
+    row.dataset.synthetic = 'true';
+  }
+
+  openEditSheet(row);
+}
+
 function openEditSheet(row) {
   editingTaskRow = row;
   const flag = row.querySelector('.task-row-flag');
@@ -6699,16 +6734,24 @@ function closeEditSheet() {
   document.getElementById('edit-sheet').classList.remove('show');
 }
 
-function editTaskFlagMattersNow() {
+async function editTaskFlagMattersNow() {
   if (!editingTaskRow) return closeEditSheet();
   let flag = editingTaskRow.querySelector('.task-row-flag');
   const textEl = editingTaskRow.querySelector('.task-text');
   const row = editingTaskRow;
+  const mattersNow = !flag;
   if (flag) {
     flag.remove();
   } else {
     textEl.insertAdjacentHTML('beforebegin', '<span class="task-row-flag">⭐</span>');
     sortMattersNowToTop(row.parentElement);
+  }
+  // Save to Supabase
+  const taskId = row.dataset.taskId;
+  if (taskId && isSupabaseReady()) {
+    await _supabase.from('tasks').update({ matters_now: mattersNow }).eq('id', taskId);
+    const t = taskStore.find(t => t.id === taskId);
+    if (t) t.matters_now = mattersNow;
   }
   closeEditSheet();
   editingTaskRow = null;
@@ -6744,11 +6787,19 @@ function editTaskMoveToLater() {
   editingTaskRow = null;
 }
 
-function editTaskDelete() {
+async function editTaskDelete() {
   if (!editingTaskRow) return closeEditSheet();
-  editingTaskRow.remove();
+  const taskId = editingTaskRow.dataset.taskId;
+  if (taskId && isSupabaseReady()) {
+    await _supabase.from('tasks').delete().eq('id', taskId);
+    taskStore = taskStore.filter(t => t.id !== taskId);
+  }
+  if (!editingTaskRow.dataset.synthetic) editingTaskRow.remove();
   closeEditSheet();
   editingTaskRow = null;
+  // Refresh all tasks view if open
+  const allView = document.querySelector('.all-tasks-view.active');
+  if (allView) renderAllTasks(currentUser, 'all');
 }
 
 // Open the full add-sheet pre-filled, for "Edit details"
