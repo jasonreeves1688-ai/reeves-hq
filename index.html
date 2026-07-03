@@ -6033,14 +6033,6 @@ function enterKidsApp(kid) {
   renderTrophy(kid);
   switchKidsTab('chores');
 }
-  });
-
-  renderKidsHero(kid);
-  renderKidsChores(kid);
-  renderKidsPrizes(kid);
-  renderTrophy(kid);
-  switchKidsTab('chores');
-}
 
 function kidsSignOut() {
   document.getElementById('kids-app').style.display = 'none';
@@ -6223,36 +6215,6 @@ function renderTrophy(kid) {
         <div class="trophy-date">${dateStr}</div>
       </div>`;
   }).join('');
-}
-
-  if (!list || list.length === 0) {
-    wallEl.innerHTML = '';
-    statsEl.innerHTML = '';
-    empty.style.display = 'block';
-    return;
-  }
-
-  empty.style.display = 'none';
-
-  const bigCount = list.filter(t => t.size === 'big').length;
-  const smallCount = list.filter(t => t.size === 'small').length;
-
-  statsEl.innerHTML = `
-    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${list.length}</div><div class="trophy-stat-label">Medals earned</div></div>
-    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${bigCount}</div><div class="trophy-stat-label">Gold medals</div></div>
-    <div class="trophy-stat"><div class="trophy-stat-num" style="color:${colorVar};">${smallCount}</div><div class="trophy-stat-label">Bronze medals</div></div>
-  `;
-
-  wallEl.innerHTML = list.map((t) => `
-    <div class="trophy-badge ${colorClass} size-${t.size}">
-      <div class="trophy-ribbon-wrap">
-        <div class="trophy-ribbon left"></div>
-        <div class="trophy-ribbon right"></div>
-        <div class="trophy-medal">${t.emoji}</div>
-      </div>
-      <div class="trophy-badge-name">${t.name}</div>
-      <div class="trophy-badge-date">${t.date}</div>
-    </div>`).join('');
 }
 
 // ═══════════════════════════════════════════
