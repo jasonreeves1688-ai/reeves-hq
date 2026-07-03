@@ -2979,6 +2979,65 @@ html, body {
   background: var(--jenny);
   color: white;
 }
+.people-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text1);
+  font-size: 13px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  margin-bottom: 8px;
+}
+.people-picker-search:focus { border-color: var(--jason); outline: none; }
+.people-picker-search::placeholder { color: var(--text3); }
+.people-picker-list {
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+}
+.people-picker-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s;
+}
+.people-picker-list-item:last-child { border-bottom: none; }
+.people-picker-list-item:hover { background: var(--surface3); }
+.people-picker-list-item.active { background: var(--jenny-bg); color: var(--jenny); }
+.people-picker-list-item .people-picker-check {
+  margin-left: auto;
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+.people-picker-list-item.active .people-picker-check {
+  background: var(--jenny);
+  border-color: var(--jenny);
+}
+.people-picker-empty {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 12px;
+}
+.people-picker-selected-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
 
 /* ── Title row with matters-now flag ─────── */
 .title-row {
@@ -5099,17 +5158,9 @@ html, body {
   <!-- People — work connections only, not sharing mechanism -->
   <div id="task-people-row">
     <div class="sheet-section-label" id="task-people-label">People</div>
-    <div class="people-picker-row" id="people-picker-row">
-      <div class="people-picker-chip" data-person="sarah" onclick="togglePersonChip(this)">
-        <span class="people-picker-avatar" style="background:var(--ridley-bg);color:var(--ridley);">SC</span> Sarah
-      </div>
-      <div class="people-picker-chip" data-person="marcus" onclick="togglePersonChip(this)">
-        <span class="people-picker-avatar" style="background:var(--jason-bg);color:var(--jason);">MW</span> Marcus
-      </div>
-      <div class="people-picker-chip" data-person="linda" onclick="togglePersonChip(this)">
-        <span class="people-picker-avatar" style="background:var(--connor-bg);color:var(--connor);">LP</span> Linda
-      </div>
-    </div>
+    <input type="text" class="people-picker-search" id="people-search-input" placeholder="Search people…" oninput="filterPeoplePicker(this.value)">
+    <div class="people-picker-list" id="people-picker-list"></div>
+    <div class="people-picker-selected-row" id="people-picker-selected-row"></div>
   </div>
 
   <div class="recur-toggle" onclick="toggleRecurSection()">
@@ -6681,9 +6732,33 @@ async function toggleTask(row) {
     ? '<svg width="10" height="10" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>'
     : '';
 
-  // Save to Supabase
   const taskId = row.dataset.taskId;
-  if (taskId && isSupabaseReady()) {
+  const storedTask = taskId ? taskStore.find(t => t.id === taskId) : null;
+  const recurPattern = row.dataset.recurPattern || storedTask?.recur_pattern || null;
+
+  if (justCompleted && recurPattern) {
+    // Recurring task — advance next_due instead of marking done forever
+    const nextDue = computeNextDue(
+      recurPattern,
+      parseInt(row.dataset.recurInterval) || storedTask?.recur_interval || 3,
+      row.dataset.recurWeekDay !== undefined && row.dataset.recurWeekDay !== ''
+        ? parseInt(row.dataset.recurWeekDay) : (storedTask?.recur_week_day ?? 1),
+      parseInt(row.dataset.recurMonthDay) || storedTask?.recur_month_day || 1
+    );
+    const nextDueStr = nextDue.toISOString().slice(0, 10);
+    row.dataset.nextDue = nextDueStr;
+
+    if (taskId && isSupabaseReady()) {
+      const { error } = await _supabase.from('tasks').update({ next_due: nextDueStr, done: false }).eq('id', taskId);
+      if (error) {
+        console.warn('[Tasks] Recurring update failed:', error.message);
+      } else if (storedTask) {
+        storedTask.next_due = nextDueStr;
+        storedTask.done = false;
+      }
+    }
+  } else if (taskId && isSupabaseReady()) {
+    // Normal, non-recurring task
     await _supabase.from('tasks').update({ done: justCompleted }).eq('id', taskId);
     if (justCompleted) {
       taskStore = taskStore.filter(t => t.id !== taskId);
@@ -6693,11 +6768,6 @@ async function toggleTask(row) {
   // Personal rewards only accrue from Jason's own task list, not Jenny's
   if (justCompleted && row.closest('#tasks-list')) {
     recordJasonCompletion();
-  }
-
-  // For recurring tasks — compute and store the next due date on completion
-  if (justCompleted && row.dataset.recurPattern) {
-    handleRecurringCompletion(row);
   }
 }
 
@@ -6783,22 +6853,11 @@ function computeNextDue(pattern, interval, weekDay, monthDay) {
   return next;
 }
 
-// When a recurring task is completed — show as done for today, reset tomorrow
-function handleRecurringCompletion(row) {
-  // Next due is computed and stored on the row's data attribute
-  const nextDue = computeNextDue(
-    row.dataset.recurPattern || 'daily',
-    parseInt(row.dataset.recurInterval) || 3,
-    parseInt(row.dataset.recurWeekDay) || 1,
-    parseInt(row.dataset.recurMonthDay) || 1
-  );
-  row.dataset.nextDue = nextDue.toISOString().slice(0,10);
-  // Visual: show as done but keep visible until next session
-  // In production this would update the DB record's next_due and reset done=false
-}
+// (Recurring completion is now handled inline in toggleTask, which persists
+// next_due to Supabase directly — see above.)
 
 // Skip today without marking done — advance next_due by one occurrence
-function editTaskSkipToday() {
+async function editTaskSkipToday() {
   if (!editingTaskRow) return closeEditSheet();
   const row = editingTaskRow;
   const pattern = row.dataset.recurPattern;
@@ -6810,7 +6869,19 @@ function editTaskSkipToday() {
     parseInt(row.dataset.recurWeekDay) || 1,
     parseInt(row.dataset.recurMonthDay) || 1
   );
-  row.dataset.nextDue = next.toISOString().slice(0,10);
+  const nextDueStr = next.toISOString().slice(0, 10);
+  row.dataset.nextDue = nextDueStr;
+
+  const taskId = row.dataset.taskId;
+  if (taskId && isSupabaseReady()) {
+    const { error } = await _supabase.from('tasks').update({ next_due: nextDueStr }).eq('id', taskId);
+    if (error) {
+      console.warn('[Tasks] Skip-today update failed:', error.message);
+    } else {
+      const t = taskStore.find(t => t.id === taskId);
+      if (t) t.next_due = nextDueStr;
+    }
+  }
 
   // Visually move to Later section (it's no longer for today)
   editTaskMoveToLater();
@@ -6834,6 +6905,7 @@ let sheetDueChoice = 'today';
 let sheetCategory = 'work';
 let sheetVisibility = 'private'; // 'private' | 'shared'
 let sheetSelectedPeople = [];
+let editingTaskOriginalPeople = []; // person ids linked to the task being edited, as loaded from DB
 let editingTaskRow = null;
 
 function openSheet() {
@@ -6884,7 +6956,11 @@ function resetSheetState() {
   setTaskVisibility('private');
 
   sheetSelectedPeople = [];
-  document.querySelectorAll('#people-picker-row .people-picker-chip').forEach(c => c.classList.remove('active'));
+  editingTaskOriginalPeople = [];
+  const peopleSearch = document.getElementById('people-search-input');
+  if (peopleSearch) peopleSearch.value = '';
+  renderPeoplePicker('');
+  renderSelectedPeopleChips();
 
   setTaskTiming('today');
   resetRecurState();
@@ -7074,14 +7150,81 @@ function addManagedDepartment() {
 }
 
 // ── People picker ──
-function togglePersonChip(chip) {
-  chip.classList.toggle('active');
-  const id = chip.dataset.person;
-  if (chip.classList.contains('active')) {
-    if (!sheetSelectedPeople.includes(id)) sheetSelectedPeople.push(id);
-  } else {
-    sheetSelectedPeople = sheetSelectedPeople.filter(p => p !== id);
+// ── Searchable people picker (replaces old static chip row) ──
+function personInitials(name) {
+  return (name || '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+}
+
+function personAvatarColor(id) {
+  const palette = [['--jason-bg', '--jason'], ['--jenny-bg', '--jenny'], ['--ridley-bg', '--ridley'], ['--connor-bg', '--connor']];
+  let hash = 0;
+  const str = String(id);
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  const pair = palette[hash % palette.length];
+  return { bg: `var(${pair[0]})`, fg: `var(${pair[1]})` };
+}
+
+function renderPeoplePicker(filterText) {
+  const list = document.getElementById('people-picker-list');
+  if (!list) return;
+  const term = (filterText || '').trim().toLowerCase();
+  const source = (typeof peopleData !== 'undefined' ? peopleData : []) || [];
+  const filtered = term ? source.filter(p => p.name.toLowerCase().includes(term)) : source;
+
+  list.innerHTML = '';
+  if (!source.length) {
+    list.innerHTML = '<div class="people-picker-empty">No people yet — add them in People</div>';
+    return;
   }
+  if (!filtered.length) {
+    list.innerHTML = '<div class="people-picker-empty">No matches</div>';
+    return;
+  }
+
+  filtered.forEach(p => {
+    const isActive = sheetSelectedPeople.includes(p.id);
+    const color = personAvatarColor(p.id);
+    const row = document.createElement('div');
+    row.className = 'people-picker-list-item' + (isActive ? ' active' : '');
+    row.dataset.personId = p.id;
+    row.innerHTML = `
+      <span class="people-picker-avatar" style="background:${color.bg};color:${color.fg};">${personInitials(p.name)}</span>
+      <span>${p.name.replace(/</g, '&lt;')}</span>
+      <span class="people-picker-check"></span>`;
+    row.onclick = () => togglePersonSelection(p.id);
+    list.appendChild(row);
+  });
+}
+
+function togglePersonSelection(id) {
+  if (sheetSelectedPeople.includes(id)) {
+    sheetSelectedPeople = sheetSelectedPeople.filter(pid => pid !== id);
+  } else {
+    sheetSelectedPeople.push(id);
+  }
+  const searchVal = document.getElementById('people-search-input')?.value || '';
+  renderPeoplePicker(searchVal);
+  renderSelectedPeopleChips();
+}
+
+function renderSelectedPeopleChips() {
+  const row = document.getElementById('people-picker-selected-row');
+  if (!row) return;
+  row.innerHTML = '';
+  const source = (typeof peopleData !== 'undefined' ? peopleData : []) || [];
+  sheetSelectedPeople.forEach(id => {
+    const p = source.find(pp => pp.id === id);
+    if (!p) return;
+    const chip = document.createElement('div');
+    chip.className = 'people-picker-chip active';
+    chip.innerHTML = `${p.name.replace(/</g, '&lt;')} <span style="margin-left:4px;opacity:0.7;">✕</span>`;
+    chip.onclick = () => togglePersonSelection(id);
+    row.appendChild(chip);
+  });
+}
+
+function filterPeoplePicker(value) {
+  renderPeoplePicker(value);
 }
 
 // ── Matters now flag (in add sheet) ──
@@ -7097,12 +7240,88 @@ function setTaskTiming(timing) {
   document.getElementById('sheet-submit-btn').textContent = timing === 'today' ? 'Add to today' : 'Add to later';
 }
 
-function addTask() {
+// ── Category id <-> name resolution against the real `categories` table ──
+let categoryCache = {};    // lowercase name -> id
+let categoryIdToName = {}; // id -> name
+
+async function getCategoryId(name) {
+  if (!name) return null;
+  const uid = currentUser === 'jenny' ? JENNY_UID : JASON_UID;
+  const key = name.toLowerCase();
+  if (categoryCache[key]) return categoryCache[key];
+  if (!isSupabaseReady()) return null;
+
+  const { data } = await _supabase.from('categories').select('id,name').eq('owner_id', uid);
+  (data || []).forEach(c => {
+    categoryCache[c.name.toLowerCase()] = c.id;
+    categoryIdToName[c.id] = c.name;
+  });
+  if (categoryCache[key]) return categoryCache[key];
+
+  // Category doesn't exist yet for this user (e.g. a custom one) — create it
+  const label = name.charAt(0).toUpperCase() + name.slice(1);
+  const { data: created, error } = await _supabase.from('categories').insert({ owner_id: uid, name: label }).select().single();
+  if (error || !created) { console.warn('[Categories] Create failed:', error?.message); return null; }
+  categoryCache[key] = created.id;
+  categoryIdToName[created.id] = created.name;
+  return created.id;
+}
+
+async function getCategoryName(id) {
+  if (!id) return null;
+  if (categoryIdToName[id]) return categoryIdToName[id];
+  if (!isSupabaseReady()) return null;
+  const { data } = await _supabase.from('categories').select('id,name').eq('id', id).single();
+  if (data) {
+    categoryIdToName[data.id] = data.name;
+    categoryCache[data.name.toLowerCase()] = data.id;
+    return data.name;
+  }
+  return null;
+}
+
+// Compute a due_date (YYYY-MM-DD) string from the sheet's due chip state
+function computeSheetDueDate() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (sheetDueChoice === 'today') {
+    return today.toISOString().slice(0, 10);
+  } else if (sheetDueChoice === 'tomorrow') {
+    const t = new Date(today);
+    t.setDate(t.getDate() + 1);
+    return t.toISOString().slice(0, 10);
+  } else if (sheetDueChoice === 'pick') {
+    return document.getElementById('task-due-date').value || null;
+  }
+  return null; // 'none'
+}
+
+// Sync a task's linked people to the `task_people` join table.
+// Diffs against editingTaskOriginalPeople so we only touch rows that changed.
+async function syncTaskPeople(taskId, ownerUid, previousIds) {
+  if (!taskId || !isSupabaseReady()) return;
+  const toAdd = sheetSelectedPeople.filter(id => !previousIds.includes(id));
+  const toRemove = previousIds.filter(id => !sheetSelectedPeople.includes(id));
+
+  for (const personId of toAdd) {
+    const { error } = await _supabase.from('task_people')
+      .insert({ task_id: taskId, person_id: personId, owner_id: ownerUid });
+    if (error) console.warn('[TaskPeople] Link failed:', error.message);
+  }
+  for (const personId of toRemove) {
+    const { error } = await _supabase.from('task_people')
+      .delete().eq('task_id', taskId).eq('person_id', personId);
+    if (error) console.warn('[TaskPeople] Unlink failed:', error.message);
+  }
+}
+
+async function addTask() {
   const input = document.getElementById('task-input');
   const text = input.value.trim();
   if (!text) return;
 
   const who = currentUser === 'jenny' ? 'jenny' : 'jason';
+  const uid = who === 'jenny' ? JENNY_UID : JASON_UID;
 
   // Visibility is now explicit: 'shared' = both see it, 'private' = just the creator
   const isShared = sheetVisibility === 'shared';
@@ -7115,20 +7334,98 @@ function addTask() {
   const label = recurLabel();
   const recurBadgeHtml = label ? `<span class="recur-badge">${label}</span>` : '';
 
+  // Shared payload fields for both insert and update
+  const dueDate = computeSheetDueDate();
+  const description = document.getElementById('task-desc').value.trim() || null;
+  const categoryId = await getCategoryId(sheetCategory);
+  const recurInterval = sheetRecurEnabled && sheetRecurPattern === 'every_n'
+    ? (parseInt(document.getElementById('recur-interval-input').value) || sheetRecurInterval) : null;
+  const recurMonthDay = sheetRecurEnabled && sheetRecurPattern === 'monthly'
+    ? (parseInt(document.getElementById('recur-monthly-day').value) || sheetRecurMonthDay) : null;
+  const recurWeekDay = sheetRecurEnabled && sheetRecurPattern === 'weekly' ? sheetRecurWeekDay : null;
+
+  const payload = {
+    title: text,
+    description,
+    due_date: dueDate,
+    matters_now: sheetMattersNow,
+    visibility: sheetVisibility,
+    category_id: categoryId,
+    recur_pattern: sheetRecurEnabled ? sheetRecurPattern : null,
+    recur_interval: recurInterval,
+    recur_week_day: recurWeekDay,
+    recur_month_day: recurMonthDay
+  };
+
   if (editingTaskRow) {
-    const textEl = editingTaskRow.querySelector('.task-text');
-    let flag = editingTaskRow.querySelector('.task-row-flag');
+    const row = editingTaskRow;
+    const taskId = row.dataset.taskId;
+
+    // Update the visible row
+    const textEl = row.querySelector('.task-text');
+    let flag = row.querySelector('.task-row-flag');
     if (sheetMattersNow && !flag) {
       textEl.insertAdjacentHTML('beforebegin', flagHtml);
     } else if (!sheetMattersNow && flag) {
       flag.remove();
     }
     textEl.textContent = text;
+
+    let existingRecurBadge = row.querySelector('.recur-badge');
+    if (existingRecurBadge) existingRecurBadge.remove();
+    if (recurBadgeHtml) textEl.insertAdjacentHTML('afterend', recurBadgeHtml);
+
+    if (sheetRecurEnabled) {
+      row.dataset.recurPattern = sheetRecurPattern;
+      row.dataset.recurInterval = recurInterval ?? '';
+      row.dataset.recurWeekDay = recurWeekDay ?? '';
+      row.dataset.recurMonthDay = recurMonthDay ?? '';
+    } else {
+      delete row.dataset.recurPattern;
+      delete row.dataset.recurInterval;
+      delete row.dataset.recurWeekDay;
+      delete row.dataset.recurMonthDay;
+    }
+
+    // Save to Supabase
+    if (taskId && isSupabaseReady()) {
+      const { error } = await _supabase.from('tasks').update(payload).eq('id', taskId);
+      if (error) {
+        console.warn('[Tasks] Update failed:', error.message);
+      } else {
+        const t = taskStore.find(t => t.id === taskId);
+        if (t) Object.assign(t, payload);
+      }
+      await syncTaskPeople(taskId, uid, editingTaskOriginalPeople);
+    }
+
+    editingTaskOriginalPeople = [];
+
+    const parentList = row.parentElement;
     editingTaskRow = null;
     input.value = '';
     closeSheet();
-    if (sheetMattersNow) sortMattersNowToTop(editingTaskRow ? editingTaskRow.parentElement : null);
+    if (parentList) sortMattersNowToTop(parentList);
+
+    // Refresh All Tasks view if open, so category/due-date changes show up
+    const allView = document.querySelector('.all-tasks-view.active');
+    if (allView) renderAllTasks(currentUser, 'all');
     return;
+  }
+
+  // NEW TASK — insert into Supabase first so we have a real id to attach
+  let newTaskId = null;
+  if (isSupabaseReady()) {
+    const { data, error } = await _supabase.from('tasks')
+      .insert({ owner_id: uid, done: false, ...payload })
+      .select().single();
+    if (error) {
+      console.warn('[Tasks] Insert failed:', error.message);
+    } else if (data) {
+      newTaskId = data.id;
+      taskStore.push(data);
+      await syncTaskPeople(newTaskId, uid, []);
+    }
   }
 
   if (taskTiming === 'today') {
@@ -7136,12 +7433,13 @@ function addTask() {
     const list = document.getElementById(listId);
     const div = document.createElement('div');
     div.className = 'task-row';
+    if (newTaskId) div.dataset.taskId = newTaskId;
     // Store recurrence metadata on the element
     if (sheetRecurEnabled) {
       div.dataset.recurPattern = sheetRecurPattern;
-      div.dataset.recurInterval = sheetRecurInterval;
-      div.dataset.recurWeekDay = sheetRecurWeekDay;
-      div.dataset.recurMonthDay = sheetRecurMonthDay;
+      div.dataset.recurInterval = recurInterval ?? '';
+      div.dataset.recurWeekDay = recurWeekDay ?? '';
+      div.dataset.recurMonthDay = recurMonthDay ?? '';
     }
     div.onclick = () => toggleTask(div);
     div.innerHTML = `<div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>${flagHtml}<div class="task-text">${text}</div>${recurBadgeHtml}${sharedBadge}<button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>`;
@@ -7155,7 +7453,6 @@ function addTask() {
   }
 
   if (isShared) addToHomeShared(text, who);
-  if (sheetRecurEnabled) handleRecurringCompletion; // will be called when task completed
 
   input.value = '';
   closeSheet();
@@ -7272,16 +7569,105 @@ async function editTaskDelete() {
 }
 
 // Open the full add-sheet pre-filled, for "Edit details"
-function openSheetForEdit() {
+async function openSheetForEdit() {
   if (!editingTaskRow) return closeEditSheet();
-  const text = editingTaskRow.querySelector('.task-text').textContent;
-  const hasFlag = !!editingTaskRow.querySelector('.task-row-flag');
+  const row = editingTaskRow;
+  const taskId = row.dataset.taskId;
+  const text = row.querySelector('.task-text').textContent;
+  const hasFlag = !!row.querySelector('.task-row-flag');
   closeEditSheet();
 
   resetSheetState();
   document.getElementById('add-sheet-title').textContent = 'Edit task';
   document.getElementById('task-input').value = text;
   if (hasFlag) toggleMattersNow();
+
+  // Prefill everything else from the stored task record, so saving doesn't
+  // silently reset fields the user isn't touching (category, due date, etc.)
+  const task = taskId ? taskStore.find(t => t.id === taskId) : null;
+  if (task) {
+    if (task.description) {
+      document.getElementById('task-desc').value = task.description;
+      document.getElementById('desc-area').classList.add('open');
+      document.getElementById('desc-toggle').classList.add('open');
+    }
+
+    if (task.due_date) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const due = new Date(task.due_date + 'T00:00:00');
+      const diffDays = Math.round((due - today) / 86400000);
+      if (diffDays === 0) {
+        setDueChip(document.querySelector('#due-date-row .sheet-chip[data-due="today"]'), 'today');
+      } else if (diffDays === 1) {
+        setDueChip(document.querySelector('#due-date-row .sheet-chip[data-due="tomorrow"]'), 'tomorrow');
+      } else {
+        setDueChip(document.querySelector('#due-date-row .sheet-chip[data-due="pick"]'), 'pick');
+        document.getElementById('task-due-date').value = task.due_date;
+      }
+    } else {
+      setDueChip(document.querySelector('#due-date-row .sheet-chip[data-due="none"]'), 'none');
+    }
+
+    if (task.category_id) {
+      const name = await getCategoryName(task.category_id);
+      if (name) {
+        const key = name.toLowerCase();
+        let chip = document.querySelector(`#category-row .sheet-chip[data-cat="${key}"]`);
+        if (!chip) {
+          const catRow = document.getElementById('category-row');
+          const addBtn = catRow.querySelector('.add-chip');
+          chip = document.createElement('div');
+          chip.className = 'sheet-chip';
+          chip.dataset.cat = key;
+          chip.textContent = name;
+          chip.onclick = () => setCategoryChip(chip, key);
+          catRow.insertBefore(chip, addBtn);
+          if (!categoriesList.includes(key)) categoriesList.push(key);
+        }
+        setCategoryChip(chip, key);
+      }
+    }
+
+    if (task.visibility) setTaskVisibility(task.visibility);
+
+    if (task.recur_pattern) {
+      sheetRecurEnabled = true;
+      document.getElementById('recur-switch').classList.add('on');
+      document.getElementById('recur-toggle-label').classList.add('active');
+      document.getElementById('recur-options').classList.add('open');
+      sheetRecurPattern = task.recur_pattern;
+      document.querySelectorAll('#recur-pattern-row .sheet-chip').forEach(c =>
+        c.classList.toggle('active', c.dataset.recur === task.recur_pattern));
+      updateRecurPatternUI();
+      if (task.recur_interval) {
+        sheetRecurInterval = task.recur_interval;
+        document.getElementById('recur-interval-input').value = task.recur_interval;
+      }
+      if (task.recur_week_day !== null && task.recur_week_day !== undefined) {
+        sheetRecurWeekDay = task.recur_week_day;
+        document.querySelectorAll('#recur-weekly-day-row .recur-day-chip').forEach(c =>
+          c.classList.toggle('active', parseInt(c.dataset.day) === task.recur_week_day));
+      }
+      if (task.recur_month_day) {
+        sheetRecurMonthDay = task.recur_month_day;
+        document.getElementById('recur-monthly-day').value = task.recur_month_day;
+      }
+    }
+  }
+
+  // Prefill linked people from the task_people join table
+  if (taskId && isSupabaseReady()) {
+    const { data, error } = await _supabase.from('task_people').select('person_id').eq('task_id', taskId);
+    if (error) {
+      console.warn('[TaskPeople] Load failed:', error.message);
+    } else {
+      const linkedIds = (data || []).map(r => r.person_id);
+      sheetSelectedPeople = linkedIds.slice();
+      editingTaskOriginalPeople = linkedIds.slice();
+      renderPeoplePicker('');
+      renderSelectedPeopleChips();
+    }
+  }
 
   document.getElementById('sheet-overlay').classList.add('show');
   document.getElementById('add-sheet').classList.add('show');
@@ -7692,6 +8078,9 @@ async function loadPeople() {
     renderNewPersonRow(person);
     createPersonDetailStub(person);
   });
+
+  // Keep the task-add-sheet people picker in sync with real data
+  renderPeoplePicker(document.getElementById('people-search-input')?.value || '');
 
   // Load open items for all people
   await loadOpenItems();
