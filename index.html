@@ -3780,15 +3780,8 @@ html, body {
 
     <!-- PRIZES TAB — THE SHOP -->
     <div class="screen" id="kscreen-prizes">
-      <div style="padding:20px 16px 0;">
-        <div style="font-size:22px; font-weight:800; color:var(--text); margin-bottom:4px;">Prize Shop</div>
-        <div style="font-size:13px; color:var(--text3); margin-bottom:20px;">Spend your points right now!</div>
-
-        <div style="font-size:11px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:var(--text3); margin-bottom:12px;">Small Prizes — every 25 pts</div>
-        <div id="kids-small-prizes-list"></div>
-
-        <div style="font-size:11px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:var(--text3); margin-bottom:12px; margin-top:20px;">Big Prizes — 100 pts each</div>
-        <div id="kids-big-prizes-list"></div>
+      <div style="padding:20px 16px 0;" id="kids-prizes-content">
+        <!-- populated by renderKidsPrizes() based on reward_type -->
       </div>
     </div>
 
@@ -4844,20 +4837,24 @@ html, body {
                 <div class="kid-hero-pts-label">Points</div>
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-                <div class="kid-hero-badge">⭐ So close!</div>
-                <button onclick="adjustPoints('ridley',10)" style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;background:rgba(91,155,213,0.2);color:var(--ridley);border:1.5px solid rgba(91,155,213,0.4);cursor:pointer;">+ Add pts</button>
+                <div class="kid-hero-badge" id="p-ridley-badge">⭐ Loading…</div>
+                <button onclick="openAdjustPointsSheet('ridley')" style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;background:rgba(91,155,213,0.2);color:var(--ridley);border:1.5px solid rgba(91,155,213,0.4);cursor:pointer;">± Points</button>
               </div>
             </div>
-            <div class="kid-progress-label"><span id="p-ridley-remaining">3 pts to small prize</span><span id="p-ridley-frac">47 / 50</span></div>
-            <div class="kid-progress-track"><div class="kid-progress-fill" style="width:94%;" id="p-ridley-bar"></div></div>
-            <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;" id="p-ridley-big">53 pts to big prize (every 100)</div>
+            <div class="kid-progress-label"><span id="p-ridley-remaining">— pts to small prize</span><span id="p-ridley-frac">— / —</span></div>
+            <div class="kid-progress-track"><div class="kid-progress-fill" style="width:0%;" id="p-ridley-bar"></div></div>
+            <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;" id="p-ridley-big">— pts to big prize (every 100)</div>
             <div id="ridley-streak-badge-wrap" style="margin-top:10px;"></div>
           </div>
+          <!-- Today's chores — parent can check off on behalf of kid -->
+          <div style="padding:14px 16px 0;">
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Today's chores</div>
+            <div class="chores-grid" id="parent-ridley-chores-today" style="padding:0;"></div>
+          </div>
+          <!-- Recent activity -->
           <div style="padding:14px 16px 0;">
             <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Recent activity</div>
-            <div class="card-sm"><div style="font-size:12px;color:var(--text2);">✅ <strong style="color:var(--text);">Made bed</strong> · +2 pts · Today</div></div>
-            <div class="card-sm"><div style="font-size:12px;color:var(--text2);">🏆 <strong style="color:var(--text);">Won small prize:</strong> Ice cream trip · 3 days ago</div></div>
-            <div class="card-sm"><div style="font-size:12px;color:var(--text2);">✅ <strong style="color:var(--text);">Fed the dog</strong> · +2 pts · Yesterday</div></div>
+            <div id="parent-ridley-activity"></div>
           </div>
           <div style="padding:0 16px;" id="deduct-section-ridley"></div>
         </div>
@@ -4873,6 +4870,14 @@ html, body {
 
         <!-- Prizes management -->
         <div id="ptab-ridley-prizes" style="display:none;">
+          <!-- Earned prizes — what Ridley has won and whether used -->
+          <div style="padding:14px 16px 0;">
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Earned prizes</div>
+            <div id="parent-ridley-earned-prizes">
+              <div style="font-size:12px;color:var(--text3);padding:12px 0;">No prizes earned yet</div>
+            </div>
+          </div>
+          <!-- Prize pool management -->
           <div style="padding:14px 16px 0;">
             <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:6px;">Small prize pool (every 25 pts)</div>
             <div id="parent-ridley-small-pool"></div>
@@ -4892,19 +4897,8 @@ html, body {
         <!-- History / trophy -->
         <div id="ptab-ridley-history" style="display:none;">
           <div style="padding:14px 16px 0;">
-            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Prizes won</div>
-            <div id="parent-ridley-history">
-              <div class="trophy-row">
-                <span class="trophy-emoji">🍦</span>
-                <div class="trophy-info"><div class="trophy-name">Ice cream trip</div><div class="trophy-date">Jun 10 · small prize</div></div>
-                <span class="trophy-status used">Used</span>
-              </div>
-              <div class="trophy-row">
-                <span class="trophy-emoji">🎬</span>
-                <div class="trophy-info"><div class="trophy-name">Movie night pick</div><div class="trophy-date">Jun 3 · small prize</div></div>
-                <span class="trophy-status unused" onclick="markUsed(this)">Mark used</span>
-              </div>
-            </div>
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">All prizes won</div>
+            <div id="parent-ridley-history"></div>
           </div>
         </div>
 
@@ -4921,19 +4915,24 @@ html, body {
                 <div class="kid-hero-pts-label">Points</div>
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-                <div class="kid-hero-badge">⚽ Keep going!</div>
-                <button onclick="adjustPoints('connor',10)" style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;background:rgba(166,130,107,0.2);color:var(--connor);border:1.5px solid rgba(166,130,107,0.4);cursor:pointer;">+ Add pts</button>
+                <div class="kid-hero-badge" id="p-connor-badge">⚽ Loading…</div>
+                <button onclick="openAdjustPointsSheet('connor')" style="font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;background:rgba(166,130,107,0.2);color:var(--connor);border:1.5px solid rgba(166,130,107,0.4);cursor:pointer;">± Points</button>
               </div>
             </div>
-            <div class="kid-progress-label"><span id="p-connor-remaining">19 pts to small prize</span><span id="p-connor-frac">31 / 50</span></div>
-            <div class="kid-progress-track"><div class="kid-progress-fill" style="width:62%;" id="p-connor-bar"></div></div>
-            <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;" id="p-connor-big">69 pts to big prize (every 100)</div>
+            <div class="kid-progress-label"><span id="p-connor-remaining">— pts to small prize</span><span id="p-connor-frac">— / —</span></div>
+            <div class="kid-progress-track"><div class="kid-progress-fill" style="width:0%;" id="p-connor-bar"></div></div>
+            <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;" id="p-connor-big">— pts to big prize (every 100)</div>
             <div id="connor-streak-badge-wrap" style="margin-top:10px;"></div>
           </div>
+          <!-- Today's chores — parent can check off on behalf of kid -->
+          <div style="padding:14px 16px 0;">
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Today's chores</div>
+            <div class="chores-grid" id="parent-connor-chores-today" style="padding:0;"></div>
+          </div>
+          <!-- Recent activity -->
           <div style="padding:14px 16px 0;">
             <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Recent activity</div>
-            <div class="card-sm"><div style="font-size:12px;color:var(--text2);">✅ <strong style="color:var(--text);">Cleared dinner table</strong> · +3 pts · Today</div></div>
-            <div class="card-sm"><div style="font-size:12px;color:var(--text2);">✅ <strong style="color:var(--text);">Made bed</strong> · +2 pts · Yesterday</div></div>
+            <div id="parent-connor-activity"></div>
           </div>
           <div style="padding:0 16px;" id="deduct-section-connor"></div>
         </div>
@@ -4947,6 +4946,14 @@ html, body {
         </div>
 
         <div id="ptab-connor-prizes" style="display:none;">
+          <!-- Earned prizes -->
+          <div style="padding:14px 16px 0;">
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Earned prizes</div>
+            <div id="parent-connor-earned-prizes">
+              <div style="font-size:12px;color:var(--text3);padding:12px 0;">No prizes earned yet</div>
+            </div>
+          </div>
+          <!-- Prize pool management -->
           <div style="padding:14px 16px 0;">
             <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:6px;">Small prize pool (every 25 pts)</div>
             <div id="parent-connor-small-pool"></div>
@@ -4965,14 +4972,8 @@ html, body {
 
         <div id="ptab-connor-history" style="display:none;">
           <div style="padding:14px 16px 0;">
-            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Prizes won</div>
-            <div id="parent-connor-history">
-              <div class="trophy-row">
-                <span class="trophy-emoji">⚽</span>
-                <div class="trophy-info"><div class="trophy-name">New soccer gear</div><div class="trophy-date">Jun 8 · small prize</div></div>
-                <span class="trophy-status unused" onclick="markUsed(this)">Mark used</span>
-              </div>
-            </div>
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">All prizes won</div>
+            <div id="parent-connor-history"></div>
           </div>
         </div>
 
@@ -5027,6 +5028,21 @@ html, body {
   </div><!-- /screens -->
 
 </div><!-- /app -->
+
+<!-- Adjust points sheet -->
+<div class="sheet-overlay" id="adjust-pts-overlay" onclick="closeAdjustPointsSheet()"></div>
+<div class="bottom-sheet" id="adjust-pts-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title" id="adjust-pts-title" style="margin-bottom:16px;">Adjust points</div>
+  <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">Points</div>
+  <input class="sheet-input" type="number" id="adjust-pts-input" placeholder="e.g. 5" min="1" style="margin-bottom:10px;">
+  <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">Reason (optional)</div>
+  <input class="sheet-input" type="text" id="adjust-pts-reason" placeholder="e.g. Helped without being asked" style="margin-bottom:16px;">
+  <div style="display:flex;gap:8px;">
+    <button onclick="submitAdjustPoints('+')" style="flex:1;padding:13px;border-radius:var(--radius-md);background:var(--ridley);color:white;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;">+ Add pts</button>
+    <button onclick="submitAdjustPoints('-')" style="flex:1;padding:13px;border-radius:var(--radius-md);background:var(--surface2);color:var(--text2);border:1px solid var(--border);font-size:14px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;">− Remove pts</button>
+  </div>
+</div>
 
 <!-- Add task sheet -->
 <div class="sheet-overlay" id="sheet-overlay" onclick="closeSheet()"></div>
@@ -5308,13 +5324,27 @@ function renderParentKidsView() {
       const fracEl = document.getElementById('p-' + kid + '-frac');
       const bigLabelEl = document.getElementById('p-' + kid + '-big');
       const barEl = document.getElementById('p-' + kid + '-bar');
+      const badgeEl = document.getElementById('p-' + kid + '-badge');
       if (remEl) remEl.textContent = (nextSmall - pts) > 0 ? (nextSmall - pts) + ' pts to small prize' : 'Small prize ready!';
       if (fracEl) fracEl.textContent = `${pts} / ${nextSmall}`;
       if (bigLabelEl) bigLabelEl.textContent = `${nextBig - pts} pts to big prize (every 100)`;
       if (barEl) barEl.style.width = pct + '%';
+      if (badgeEl) badgeEl.textContent = pts % 25 === 0 && pts > 0 ? '🎉 Prize ready!' : (kid === 'ridley' ? '⭐ Keep going!' : '⚽ Keep going!');
     }
 
-    // Chores list
+    // Today's chores — checkable, mirrors kids view
+    renderParentChoresForToday(kid);
+
+    // Recent activity feed
+    renderActivityFeed(kid);
+
+    // Earned prizes
+    renderEarnedPrizes(kid);
+
+    // History tab
+    renderPrizeHistory(kid);
+
+    // Chores management list
     const choresList = document.getElementById('parent-' + kid + '-chores-list');
     if (choresList) {
       choresList.innerHTML = '';
@@ -5333,7 +5363,7 @@ function renderParentKidsView() {
       });
     }
 
-    // Small prizes
+    // Small prizes pool
     const smallPool = document.getElementById('parent-' + kid + '-small-pool');
     if (smallPool) {
       smallPool.innerHTML = '';
@@ -5346,7 +5376,7 @@ function renderParentKidsView() {
       });
     }
 
-    // Big prizes
+    // Big prizes pool
     const bigPool = document.getElementById('parent-' + kid + '-big-pool');
     if (bigPool) {
       bigPool.innerHTML = '';
@@ -5362,6 +5392,271 @@ function renderParentKidsView() {
     // Deduct chips
     renderDeductChips(kid);
   });
+}
+
+// ── Today's chores in parent view — checkable ─────────────────────
+function renderParentChoresForToday(kid) {
+  const container = document.getElementById('parent-' + kid + '-chores-today');
+  if (!container) return;
+
+  const abbr = kid === 'ridley' ? 'r' : 'c';
+  const kidProfile = kidsStore.profiles[kid];
+  const kidId = kidProfile?.id;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCompletions = kidsStore.completions
+    .filter(c => c.kid_id === kidId && c.completed_at?.slice(0, 10) === today)
+    .map(c => c.chore_name);
+
+  const positiveChores = kidsStore.chores.filter(c => c.points > 0 && c.active !== false);
+
+  if (positiveChores.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0;">No chores set up yet</div>';
+    return;
+  }
+
+  container.innerHTML = positiveChores.map(c => {
+    const done = todayCompletions.includes(c.name);
+    const doneClass = done ? (kid === 'ridley' ? 'done-r' : 'done-c') : '';
+    const ptsClass = kid === 'ridley' ? 'pts-ridley' : 'pts-connor';
+    return `
+      <div class="chore-card ${doneClass}" onclick="toggleChore(this,'${abbr}')" data-chore-id="${c.id}" data-chore-name="${c.name.replace(/"/g,'&quot;')}">
+        <div class="chore-card-check">${done ? '✓' : ''}</div>
+        <div class="chore-card-text">${c.emoji} ${c.name}</div>
+        <div class="chore-card-pts ${ptsClass}">+${c.points}</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Recent activity feed ──────────────────────────────────────────
+function renderActivityFeed(kid) {
+  const container = document.getElementById('parent-' + kid + '-activity');
+  if (!container) return;
+
+  const kidProfile = kidsStore.profiles[kid];
+  const kidId = kidProfile?.id;
+
+  // Last 10 completions for this kid
+  const recent = kidsStore.completions
+    .filter(c => c.kid_id === kidId)
+    .slice(0, 10);
+
+  // Last 5 redemptions for this kid
+  const recentRedemptions = kidsStore.redemptions
+    .filter(r => r.kid_id === kidId)
+    .slice(0, 5);
+
+  // Merge and sort by date
+  const items = [
+    ...recent.map(c => ({
+      type: 'chore',
+      text: c.chore_name,
+      pts: c.points,
+      date: c.completed_at,
+      ts: new Date(c.completed_at).getTime(),
+    })),
+    ...recentRedemptions.map(r => ({
+      type: 'prize',
+      text: r.prize_name,
+      date: r.redeemed_at,
+      ts: new Date(r.redeemed_at).getTime(),
+    })),
+  ].sort((a, b) => b.ts - a.ts).slice(0, 8);
+
+  if (items.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0;">No activity yet</div>';
+    return;
+  }
+
+  container.innerHTML = items.map(item => {
+    const dateStr = new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (item.type === 'chore') {
+      const sign = item.pts > 0 ? '+' : '';
+      return `<div class="card-sm"><div style="font-size:12px;color:var(--text2);">${item.pts > 0 ? '✅' : '📉'} <strong style="color:var(--text);">${item.text}</strong> · ${sign}${item.pts} pts · ${dateStr}</div></div>`;
+    } else {
+      return `<div class="card-sm"><div style="font-size:12px;color:var(--text2);">🏆 <strong style="color:var(--text);">Won: ${item.text}</strong> · ${dateStr}</div></div>`;
+    }
+  }).join('');
+}
+
+// ── Earned prizes (unredeemed/redeemed but not yet used) ──────────
+function renderEarnedPrizes(kid) {
+  const container = document.getElementById('parent-' + kid + '-earned-prizes');
+  if (!container) return;
+
+  const profile = kidsStore.profiles[kid];
+  const kidId = profile?.id;
+  const isAllowance = profile?.reward_type === 'allowance';
+  const redemptions = kidsStore.redemptions.filter(r => r.kid_id === kidId);
+  const colorVar = kid === 'ridley' ? 'ridley' : 'connor';
+
+  if (isAllowance) {
+    // Split: old prize entries (source != 'allowance') vs new allowance entries
+    const prizeEntries = redemptions.filter(r => r.source !== 'allowance');
+    const allowanceEntries = redemptions.filter(r => r.source === 'allowance');
+    const total = allowanceEntries.reduce((sum, r) => sum + (r.points_spent || 0), 0);
+    const unpaid = allowanceEntries.filter(r => !r.used).reduce((sum, r) => sum + (r.points_spent || 0), 0);
+
+    const renderPrizeRow = r => {
+      const dateStr = new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const emoji = r.prize_name?.match(/^\p{Emoji}/u)?.[0] || '🏆';
+      const name = (r.prize_name || '').replace(/^\p{Emoji}\s*/u, '');
+      return `<div class="parent-chore-row" style="${r.used ? 'opacity:0.5;' : ''}">
+        <span style="font-size:18px;flex-shrink:0;">${emoji}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text);">${name}</div>
+          <div style="font-size:10px;color:var(--text3);">Won ${dateStr}</div>
+        </div>
+        ${r.used
+          ? '<span style="font-size:10px;font-weight:700;color:var(--text3);padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);">Used ✓</span>'
+          : `<button onclick="markRedemptionUsed('${r.id}','${kid}')" style="font-size:10px;font-weight:700;color:var(--${colorVar});background:var(--${colorVar}-bg);border:1px solid var(--${colorVar}-border);padding:4px 10px;border-radius:8px;cursor:pointer;">Mark used</button>`
+        }
+      </div>`;
+    };
+
+    const renderAllowanceRow = r => {
+      const dateStr = new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `<div class="parent-chore-row" style="${r.used ? 'opacity:0.5;' : ''}">
+        <span style="font-size:20px;">💵</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:var(--text);">$${r.points_spent}</div>
+          <div style="font-size:10px;color:var(--text3);">${r.prize_name || ''} · ${dateStr}</div>
+        </div>
+        ${r.used
+          ? '<span style="font-size:10px;font-weight:700;color:var(--text3);padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);">Paid ✓</span>'
+          : `<button onclick="markRedemptionUsed('${r.id}','${kid}')" style="font-size:10px;font-weight:700;color:var(--${colorVar});background:var(--${colorVar}-bg);border:1px solid var(--${colorVar}-border);padding:4px 10px;border-radius:8px;cursor:pointer;">Mark paid</button>`
+        }
+      </div>`;
+    };
+
+    container.innerHTML = `
+      ${prizeEntries.length > 0 ? `
+        <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">Prizes still to use</div>
+        ${prizeEntries.map(renderPrizeRow).join('')}
+        <div style="height:16px;"></div>
+      ` : ''}
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">Allowance</div>
+      <div style="display:flex;gap:10px;margin-bottom:12px;">
+        <div class="trophy-stat" style="border-color:var(--${colorVar}-border);background:var(--${colorVar}-bg);">
+          <div class="trophy-stat-num" style="color:var(--${colorVar});">$${total}</div>
+          <div class="trophy-stat-label">Total earned</div>
+        </div>
+        <div class="trophy-stat">
+          <div class="trophy-stat-num" style="color:var(--${colorVar});">$${unpaid}</div>
+          <div class="trophy-stat-label">Unpaid</div>
+        </div>
+      </div>
+      ${allowanceEntries.length === 0
+        ? '<div style="font-size:12px;color:var(--text3);padding:8px 0;">No allowance earned yet</div>'
+        : allowanceEntries.map(renderAllowanceRow).join('')
+      }`;
+  } else {
+    // Connor — prizes only
+    if (redemptions.length === 0) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:12px 0;">No prizes earned yet</div>';
+      return;
+    }
+    container.innerHTML = redemptions.map(r => {
+      const dateStr = new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `
+        <div class="parent-chore-row" style="${r.used ? 'opacity:0.5;' : ''}">
+          <span style="font-size:18px;flex-shrink:0;">${r.prize_name?.match(/^\p{Emoji}/u)?.[0] || '🏆'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);">${(r.prize_name || '').replace(/^\p{Emoji}\s*/u, '')}</div>
+            <div style="font-size:10px;color:var(--text3);">Won ${dateStr}</div>
+          </div>
+          ${r.used
+            ? '<span style="font-size:10px;font-weight:700;color:var(--text3);padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);">Used ✓</span>'
+            : `<button onclick="markRedemptionUsed('${r.id}','${kid}')" style="font-size:10px;font-weight:700;color:var(--${colorVar});background:var(--${colorVar}-bg);border:1px solid var(--${colorVar}-border);padding:4px 10px;border-radius:8px;cursor:pointer;">Mark used</button>`
+          }
+        </div>`;
+    }).join('');
+  }
+}
+
+
+// ── Prize history (all time) ──────────────────────────────────────
+function renderPrizeHistory(kid) {
+  const container = document.getElementById('parent-' + kid + '-history');
+  if (!container) return;
+
+  const kidProfile = kidsStore.profiles[kid];
+  const kidId = kidProfile?.id;
+  const redemptions = kidsStore.redemptions.filter(r => r.kid_id === kidId);
+
+  if (redemptions.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:12px 0;">No prizes won yet</div>';
+    return;
+  }
+
+  container.innerHTML = redemptions.map(r => {
+    const dateStr = new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `
+      <div class="parent-chore-row" style="${r.used ? 'opacity:0.5;' : ''}">
+        <span style="font-size:18px;flex-shrink:0;">${r.prize_name?.match(/^\p{Emoji}/u)?.[0] || '🏆'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text);">${(r.prize_name || '').replace(/^\p{Emoji}\s*/u, '')}</div>
+          <div style="font-size:10px;color:var(--text3);">${dateStr}${r.used ? ' · Used' : ''}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Mark a prize redemption as used ──────────────────────────────
+async function markRedemptionUsed(redemptionId, kid) {
+  if (isSupabaseReady()) {
+    await _supabase.from('prize_redemptions').update({ used: true }).eq('id', redemptionId);
+  }
+  // Update local store
+  const r = kidsStore.redemptions.find(r => r.id === redemptionId);
+  if (r) r.used = true;
+  renderEarnedPrizes(kid);
+  renderPrizeHistory(kid);
+}
+
+// ── Adjust points sheet ───────────────────────────────────────────
+let adjustPointsKid = null;
+
+function openAdjustPointsSheet(kid) {
+  adjustPointsKid = kid;
+  const profile = kidsStore.profiles[kid];
+  const color = kid === 'ridley' ? 'var(--ridley)' : 'var(--connor)';
+  document.getElementById('adjust-pts-title').textContent = `Adjust ${profile?.name || kid}'s points`;
+  document.getElementById('adjust-pts-title').style.color = color;
+  document.getElementById('adjust-pts-input').value = '';
+  document.getElementById('adjust-pts-reason').value = '';
+  document.getElementById('adjust-pts-overlay').classList.add('show');
+  document.getElementById('adjust-pts-sheet').classList.add('show');
+  document.getElementById('adjust-pts-input').focus();
+}
+
+function closeAdjustPointsSheet() {
+  document.getElementById('adjust-pts-overlay').classList.remove('show');
+  document.getElementById('adjust-pts-sheet').classList.remove('show');
+}
+
+async function submitAdjustPoints(sign) {
+  const val = parseInt(document.getElementById('adjust-pts-input').value);
+  const reason = document.getElementById('adjust-pts-reason').value.trim() || 'Manual adjustment';
+  if (!val || !adjustPointsKid) return;
+  const amount = sign === '+' ? Math.abs(val) : -Math.abs(val);
+  await adjustPoints(adjustPointsKid, amount);
+  // Log to chore_completions so it shows in activity feed
+  if (isSupabaseReady()) {
+    const kidProfile = kidsStore.profiles[adjustPointsKid];
+    if (kidProfile) {
+      const { data } = await _supabase.from('chore_completions').insert({
+        owner_id: JASON_UID,
+        kid_id: kidProfile.id,
+        chore_name: reason,
+        points: amount,
+        logged_by: 'parent-manual',
+      }).select().single();
+      if (data) kidsStore.completions.unshift(data);
+    }
+  }
+  renderActivityFeed(adjustPointsKid);
+  showKidsToast(`${amount > 0 ? '+' : ''}${amount} pts — ${reason}`);
+  closeAdjustPointsSheet();
 }
 
 // Helper to get points for a kid
@@ -6064,12 +6359,19 @@ function enterKidsApp(kid) {
   const emoji = profile?.emoji || (kid === 'ridley' ? '💃' : '⚡');
   const name = profile?.name || (kid === 'ridley' ? 'Ridley' : 'Connor');
   const pts = profile?.points || 0;
+  const isAllowance = profile?.reward_type === 'allowance';
 
   document.getElementById('kids-app-emoji').textContent = emoji;
   document.getElementById('kids-app-name').textContent = name;
   document.getElementById('kids-app-pts-header').textContent = pts + ' pts';
   document.getElementById('kids-app-pts-header').style.color = color;
   document.getElementById('kids-app-header').style.borderBottomColor = color;
+
+  // Update Prizes/Allowance nav label
+  const prizesNav = document.getElementById('knav-prizes');
+  if (prizesNav) {
+    prizesNav.innerHTML = `<span style="font-size:18px;">${isAllowance ? '💵' : '🏆'}</span><span>${isAllowance ? 'Allowance' : 'Prizes'}</span>`;
+  }
 
   document.querySelectorAll('.kids-nav-item').forEach(n => {
     n.classList.toggle('connor-nav', kid === 'connor');
@@ -6099,15 +6401,28 @@ function switchKidsTab(tab) {
 
 function renderKidsHero(kid) {
   const pts = kidsPoints(kid);
-  // Next small prize milestone = next multiple of 25; next big = next multiple of 100
+  const profile = kidsStore.profiles[kid];
+  const isAllowance = profile?.reward_type === 'allowance';
+  const rateSmall = profile?.allowance_rate_small || 5;
+  const rateBig = profile?.allowance_rate_big || 10;
+
   const nextSmall = Math.ceil((pts + 1) / 25) * 25;
   const nextBig = Math.ceil((pts + 1) / 100) * 100;
   const remainingSmall = nextSmall - pts;
   const pct = Math.min(100, Math.round((pts / nextSmall) * 100));
-  const color = kid === 'ridley' ? 'var(--ridley)' : 'var(--connor)';
   const heroClass = kid === 'ridley' ? 'ridley-hero' : 'connor-hero';
   const atMilestone = pts > 0 && pts % 25 === 0;
-  const badge = atMilestone ? '🎉 Prize ready!' : (kid === 'ridley' ? '⭐ So close!' : '⚽ Keep going!');
+
+  let badge, progressLabel, bigLabel;
+  if (isAllowance) {
+    badge = atMilestone ? `💵 $${pts % 100 === 0 ? rateBig : rateSmall} earned!` : `💵 ${remainingSmall} pts → $${pts % 100 === 75 ? rateBig : rateSmall}`;
+    progressLabel = `${remainingSmall} pts to $${nextSmall % 100 === 0 ? rateBig : rateSmall}`;
+    bigLabel = `${nextBig - pts} pts to $${rateBig}`;
+  } else {
+    badge = atMilestone ? '🎉 Prize ready!' : (kid === 'ridley' ? '⭐ Keep going!' : '⚽ Keep going!');
+    progressLabel = remainingSmall > 0 ? `${remainingSmall} pts to small prize` : 'Small prize ready!';
+    bigLabel = `${nextBig - pts} pts to big prize (every 100)`;
+  }
 
   document.getElementById('kids-standalone-hero').innerHTML = `
     <div class="kid-hero ${heroClass}" style="margin:14px 16px 0;">
@@ -6119,13 +6434,13 @@ function renderKidsHero(kid) {
         <div class="kid-hero-badge">${badge}</div>
       </div>
       <div class="kid-progress-label">
-        <span>${remainingSmall > 0 ? remainingSmall + ' pts to small prize' : 'Small prize ready!'}</span>
+        <span>${progressLabel}</span>
         <span>${pts} / ${nextSmall}</span>
       </div>
       <div class="kid-progress-track">
         <div class="kid-progress-fill" style="width:${pct}%;"></div>
       </div>
-      <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;">${nextBig - pts} pts to big prize (every 100)</div>
+      <div style="font-size:10px; color:var(--text3); margin-top:8px; font-weight:600;">${bigLabel}</div>
       <div id="${kid}-kid-streak-badge-wrap" style="margin-top:10px;"></div>
     </div>`;
   renderStreakBadge(kid, kid + '-kid-streak-badge-wrap');
@@ -6194,27 +6509,85 @@ function showKidsToast(text) {
 }
 
 function renderKidsPrizes(kid) {
+  const profile = kidsStore.profiles[kid];
+  const isAllowance = profile?.reward_type === 'allowance';
   const color = kid === 'ridley' ? 'ridley' : 'connor';
-  const pts = kidsPoints(kid);
+  const container = document.getElementById('kids-prizes-content');
+  if (!container) return;
 
-  const renderPrize = (p, size) => `
-    <div class="prize-list-item" onclick="redeemPrize('${kid}','${size}','${p.id}','${p.name.replace(/'/g,"\\'")}')">
-      <span style="font-size:26px;">${p.name.match(/^\p{Emoji}/u)?.[0] || '🎁'}</span>
-      <div style="flex:1;">
-        <div style="font-size:14px;font-weight:700;color:var(--text);">${p.name.replace(/^\p{Emoji}\s*/u, '')}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${size === 'small' ? '25 pts' : '100 pts'}</div>
+  if (isAllowance) {
+    const kidId = profile?.id;
+    const redemptions = kidsStore.redemptions.filter(r => r.kid_id === kidId);
+    const prizeEntries = redemptions.filter(r => r.source !== 'allowance');
+    const allowanceEntries = redemptions.filter(r => r.source === 'allowance');
+    const total = allowanceEntries.reduce((sum, r) => sum + (r.points_spent || 0), 0);
+
+    const prizeSection = prizeEntries.length > 0 ? `
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">Prizes still to use</div>
+      ${prizeEntries.filter(r => !r.used).map(r => {
+        const emoji = r.prize_name?.match(/^\p{Emoji}/u)?.[0] || '🏆';
+        const name = (r.prize_name || '').replace(/^\p{Emoji}\s*/u, '');
+        return `<div class="prize-list-item" style="background:var(--ridley-bg);border-color:var(--ridley-border);">
+          <span style="font-size:26px;">${emoji}</span>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">Earned before allowance</div>
+          </div>
+          <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:20px;background:var(--ridley-bg);color:var(--ridley);border:1.5px solid var(--ridley-border);">Use it!</span>
+        </div>`;
+      }).join('')}
+      <div style="height:20px;"></div>
+    ` : '';
+
+    container.innerHTML = `
+      <div style="font-size:22px; font-weight:800; color:var(--text); margin-bottom:4px;">Allowance</div>
+      <div style="font-size:13px; color:var(--text3); margin-bottom:20px;">$5 every 25 pts · $10 every 100 pts</div>
+      <div class="kid-hero ridley-hero" style="margin-bottom:20px;padding:16px;">
+        <div style="font-size:36px;font-weight:800;color:var(--ridley);">$${total}</div>
+        <div style="font-size:11px;font-weight:700;color:rgba(91,155,213,0.7);text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;">Total earned</div>
       </div>
-      <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:20px;background:var(--${color}-bg);color:var(--${color});border:1.5px solid var(--${color}-border);">Redeem</span>
-    </div>`;
+      ${prizeSection}
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Earnings history</div>
+      ${allowanceEntries.length === 0
+        ? '<div style="font-size:13px;color:var(--text3);padding:12px 0;">No allowance earned yet</div>'
+        : allowanceEntries.map(r => {
+            const dateStr = new Date(r.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return `<div class="parent-chore-row" style="${r.used ? 'opacity:0.5;' : ''}">
+              <span style="font-size:20px;">💵</span>
+              <div style="flex:1;">
+                <div style="font-size:14px;font-weight:700;color:var(--text);">$${r.points_spent}</div>
+                <div style="font-size:11px;color:var(--text3);">${dateStr}</div>
+              </div>
+              ${r.used ? '<span style="font-size:10px;font-weight:700;color:var(--text3);">Paid ✓</span>' : ''}
+            </div>`;
+          }).join('')
+      }`;
+  } else {
+    // Prize shop view
+    const renderPrize = (p, size) => `
+      <div class="prize-list-item" onclick="redeemPrize('${kid}','${size}','${p.id}','${p.name.replace(/'/g,"\'")}')">
+        <span style="font-size:26px;">${p.name.match(/^\p{Emoji}/u)?.[0] || '🎁'}</span>
+        <div style="flex:1;">
+          <div style="font-size:14px;font-weight:700;color:var(--text);">${p.name.replace(/^\p{Emoji}\s*/u, '')}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">${size === 'small' ? '25 pts' : '100 pts'}</div>
+        </div>
+        <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:20px;background:var(--${color}-bg);color:var(--${color});border:1.5px solid var(--${color}-border);">Redeem</span>
+      </div>`;
 
-  document.getElementById('kids-small-prizes-list').innerHTML =
-    kidsPrizePool('small').map(p => renderPrize(p, 'small')).join('') ||
-    '<div style="color:var(--text3);font-size:12px;padding:12px;">No small prizes set up yet</div>';
-
-  document.getElementById('kids-big-prizes-list').innerHTML =
-    kidsPrizePool('big').map(p => renderPrize(p, 'big')).join('') ||
-    '<div style="color:var(--text3);font-size:12px;padding:12px;">No big prizes set up yet</div>';
+    container.innerHTML = `
+      <div style="font-size:22px; font-weight:800; color:var(--text); margin-bottom:4px;">Prize Shop</div>
+      <div style="font-size:13px; color:var(--text3); margin-bottom:20px;">Spend your points right now!</div>
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Small Prizes — every 25 pts</div>
+      <div id="kids-small-prizes-list">
+        ${kidsPrizePool('small').map(p => renderPrize(p, 'small')).join('') || '<div style="color:var(--text3);font-size:12px;padding:12px;">No small prizes set up yet</div>'}
+      </div>
+      <div style="font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:12px;margin-top:20px;">Big Prizes — 100 pts each</div>
+      <div id="kids-big-prizes-list">
+        ${kidsPrizePool('big').map(p => renderPrize(p, 'big')).join('') || '<div style="color:var(--text3);font-size:12px;padding:12px;">No big prizes set up yet</div>'}
+      </div>`;
+  }
 }
+
 
 function renderTrophy(kid) {
   const kidProfile = kidsStore.profiles[kid];
@@ -8659,11 +9032,43 @@ function switchParentTab(tab) {
 async function adjustPoints(kid, amount) {
   const profile = kidsStore.profiles[kid];
   if (!profile) return;
-  const newPts = Math.max(0, profile.points + amount);
+  const oldPts = profile.points;
+  const newPts = Math.max(0, oldPts + amount);
   profile.points = newPts;
 
   if (isSupabaseReady()) {
     await _supabase.from('kids_profiles').update({ points: newPts }).eq('id', profile.id);
+  }
+
+  // ── Allowance milestone check (Ridley only) ───────────────────
+  if (profile.reward_type === 'allowance' && amount > 0) {
+    const rateSmall = profile.allowance_rate_small || 5;
+    const rateBig = profile.allowance_rate_big || 10;
+
+    // Find 100-point marks crossed
+    const bigsCrossed = [];
+    for (let m = Math.ceil(oldPts / 100) * 100; m <= newPts; m += 100) {
+      if (m > oldPts && m % 100 === 0) bigsCrossed.push(m);
+    }
+
+    // Find 25-point marks crossed that are NOT also 100-point marks
+    const smallsCrossed = [];
+    for (let m = Math.ceil(oldPts / 25) * 25; m <= newPts; m += 25) {
+      if (m > oldPts && m % 25 === 0 && m % 100 !== 0) smallsCrossed.push(m);
+    }
+
+    for (const milestone of bigsCrossed) {
+      await logAllowanceEarning(profile, rateBig, `$${rateBig} allowance — ${milestone} point milestone`);
+      showKidsToast(`💵 $${rateBig} allowance earned at ${milestone} pts!`);
+    }
+    for (const milestone of smallsCrossed) {
+      await logAllowanceEarning(profile, rateSmall, `$${rateSmall} allowance — ${milestone} point milestone`);
+      showKidsToast(`💵 $${rateSmall} allowance earned at ${milestone} pts!`);
+    }
+    if (bigsCrossed.length || smallsCrossed.length) {
+      renderKidsPrizes(kid); // refresh allowance history
+      renderEarnedPrizes(kid);
+    }
   }
 
   // Update all point displays
@@ -8691,6 +9096,19 @@ async function adjustPoints(kid, amount) {
 
   if (selectedKid === kid) renderKidsHero(kid);
   if (amount > 0) updateChallengeProgress(kid, amount);
+}
+
+async function logAllowanceEarning(profile, amount, label) {
+  const entry = {
+    owner_id: JASON_UID,
+    kid_id: profile.id,
+    prize_name: label,
+    points_spent: amount,
+    used: false,
+    source: 'allowance',
+  };
+  const { data } = await _supabase.from('prize_redemptions').insert(entry).select().single();
+  if (data) kidsStore.redemptions.unshift(data);
 }
 
 // Advances this kid's progress on every active challenge, checks for a winner
