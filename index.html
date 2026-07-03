@@ -3953,38 +3953,7 @@ html, body {
       <div class="screen-pad" style="padding-bottom:0; padding-top:16px;">
         <div class="section-eyebrow">Today's picks</div>
         <div id="tasks-list">
-          <div class="task-row" onclick="toggleTask(this)">
-            <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
-            <span class="task-row-flag">⭐</span>
-            <div class="task-text">Q3 deck review with Sarah</div>
-            <div class="task-badge badge-time">10am</div>
-            <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          </div>
-          <div class="task-row" onclick="toggleTask(this)">
-            <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
-            <div class="task-text">Follow up with Marcus re: proposal</div>
-            <div class="task-badge badge-nudge">nudge</div>
-            <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          </div>
-          <div class="task-row" onclick="toggleTask(this)">
-            <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
-            <div class="task-text">Book Ridley's dance class registration</div>
-            <div class="task-badge badge-home">home</div>
-            <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          </div>
-          <div class="task-row" data-recur-pattern="weekly" data-recur-week-day="1" onclick="toggleTask(this)">
-            <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
-            <div class="task-text">Weekly 1:1 with Dev team</div>
-            <span class="recur-badge">Weekly · Mon</span>
-            <div class="task-badge badge-time">2pm</div>
-            <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          </div>
-          <div class="task-row" onclick="toggleTask(this)">
-            <div class="task-check" onclick="event.stopPropagation();toggleTask(this.parentElement)"></div>
-            <div class="task-text">Pick up dry cleaning</div>
-            <div class="task-badge badge-home">home</div>
-            <button class="task-edit-btn" onclick="event.stopPropagation();openEditSheet(this.parentElement)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          </div>
+          <!-- populated dynamically from Supabase via renderTodayFromPicks -->
         </div>
 
         <!-- Later — collapsible backlog -->
@@ -5717,6 +5686,7 @@ function updatePickFooter() {
 function renderTodayFromPicks(who, picks) {
   const listId = who === 'jenny' ? 'tasks-list-jenny' : 'tasks-list';
   const list = document.getElementById(listId);
+  list.innerHTML = ''; // clear demo rows and previous picks
   picks.forEach(item => {
     const task = taskStore.find(t => t.id === item.id);
     if (task) {
@@ -5820,29 +5790,41 @@ function renderAllTasks(user, filter) {
   if (!listEl) return;
 
   const today = new Date().toISOString().slice(0, 10);
-  const todayPickIds = new Set((loadTodayPicks(user) || []).map(id => id));
+  const todayPickIds = new Set((loadTodayPicks(user) || []));
 
   // Apply filter against taskStore
   const filtered = taskStore.filter(t => {
-    if (filter === 'all') return true;
+    if (filter === 'all' || filter === 'active') return true; // taskStore only has done:false
+    if (filter === 'done') return false; // done tasks not in taskStore — show empty
     if (filter === 'matters') return t.matters_now;
     if (filter === 'due') return t.next_due && t.next_due <= today;
-    if (filter === 'work') return t.category_id !== null; // rough proxy until categories wired
+    if (filter === 'work') {
+      // Work = has a category (rough proxy until categories fully wired)
+      return t.category_id !== null;
+    }
+    if (filter === 'home') {
+      return t.category_id === null; // no category = likely personal/home
+    }
+    if (filter === 'shared') return t.visibility === 'shared';
     return true;
   });
 
   if (filtered.length === 0) {
-    listEl.innerHTML = `<div class="all-tasks-empty">Nothing here</div>`;
+    if (filter === 'done') {
+      listEl.innerHTML = `<div class="all-tasks-empty">Completed tasks aren't stored here yet — coming in a future update.</div>`;
+    } else {
+      listEl.innerHTML = `<div class="all-tasks-empty">Nothing here</div>`;
+    }
     return;
   }
 
-  // Group: Today's picks first, then rest sorted by due date
+  // Group: Today's picks first, then everything else
   const todayItems = filtered.filter(t => todayPickIds.has(t.id));
   const otherItems = filtered.filter(t => !todayPickIds.has(t.id));
 
   const groups = [
     { label: 'Today', items: todayItems },
-    { label: 'Everything else', items: otherItems },
+    { label: filter === 'matters' ? 'Urgent' : filter === 'due' ? 'Overdue / due today' : 'Everything else', items: otherItems },
   ].filter(g => g.items.length > 0);
 
   listEl.innerHTML = groups.map(g => `
@@ -5855,6 +5837,7 @@ function renderAllTasks(user, filter) {
           <div class="all-task-meta">
             ${t.next_due ? `<span class="all-task-pill ${t.next_due <= today ? 'due-soon' : ''}">${new Date(t.next_due).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>` : ''}
             ${t.matters_now ? `<span class="all-task-pill due-soon">⭐ Urgent</span>` : ''}
+            ${t.visibility === 'shared' ? `<span class="all-task-pill">Shared</span>` : ''}
           </div>
         </div>
         <button class="task-edit-btn" onclick="event.stopPropagation(); openEditSheetById('${t.id}')">
