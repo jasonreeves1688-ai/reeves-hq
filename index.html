@@ -5933,6 +5933,13 @@ let jasonRewards = {
 const JASON_UID = '79841aaf-b533-4189-994e-5531ebf2339d';
 const JENNY_UID = 'YOUR_JENNY_UID'; // b65f69ae-057b-4865-95b1-a1ebd834cc41
 
+// Family-wide queries (shared tasks, meal library, etc.) filter by this list.
+// Until Jenny's real UID is wired in above, this quietly excludes the
+// placeholder instead of sending an invalid UUID and getting a 400 back.
+function familyUids() {
+  return [JASON_UID, JENNY_UID].filter(uid => uid && uid !== 'YOUR_JENNY_UID');
+}
+
 function resolveUser(uid) {
   if (uid === JASON_UID) return 'jason';
   if (uid === JENNY_UID) return 'jenny';
@@ -9378,7 +9385,7 @@ async function loadMealLibrary() {
   if (!isSupabaseReady()) return;
   const { data, error } = await _supabase.from('meal_library')
     .select('*')
-    .in('owner_id', [JASON_UID, JENNY_UID])
+    .in('owner_id', familyUids())
     .order('created_at', { ascending: true });
   if (error) { console.warn('[Home] Meal library load failed:', error.message); return; }
   mealLibrary = data || [];
@@ -9449,7 +9456,7 @@ async function loadSharedTasks() {
     .select('*')
     .eq('visibility', 'shared')
     .eq('done', false)
-    .in('owner_id', [JASON_UID, JENNY_UID])
+    .in('owner_id', familyUids())
     .order('due_date', { ascending: true, nullsFirst: false });
   if (error) {
     console.warn('[Home] Shared tasks load failed:', error.message);
@@ -10072,6 +10079,10 @@ async function logAllowanceEarning(profile, amount, label) {
 }
 
 // Advances this kid's progress on every active challenge, checks for a winner
+// Head-to-head kid challenges — was referenced everywhere but never declared,
+// which silently crashed on every page load and broke anything initialized after it
+let challenges = [];
+
 function updateChallengeProgress(kid, amount) {
   let changed = false;
   challenges.forEach(ch => {
@@ -11202,29 +11213,37 @@ restoreSession();
   document.getElementById('pwa-manifest-link').href = url;
 })();
 
-// ── Register service worker (offline shell caching) ──
+// ── Register service worker (offline fallback only — never masks a fresh deploy) ──
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'reeves-hq-v1';
+    const CACHE = 'reeves-hq-v2';
     self.addEventListener('install', e => {
       self.skipWaiting();
     });
     self.addEventListener('activate', e => {
-      e.waitUntil(clients.claim());
+      // Drop any caches from previous versions so old app shells can't linger
+      e.waitUntil(
+        caches.keys().then(keys => Promise.all(
+          keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+        )).then(() => clients.claim())
+      );
     });
     self.addEventListener('fetch', e => {
-      // Network first for API calls, cache first for the app shell
+      // Live data always goes straight to the network — never cached
       if (e.request.url.includes('supabase.co') || e.request.url.includes('googleapis.com')) {
         e.respondWith(fetch(e.request));
-      } else {
-        e.respondWith(
-          caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-            const clone = res.clone();
-            caches.open(CACHE).then(cache => cache.put(e.request, clone));
-            return res;
-          }))
-        );
+        return;
       }
+      // Network-first for the app shell itself: whenever you're online, you
+      // always get the latest deployed version. Cache is only a fallback for
+      // when you're genuinely offline — it should never be able to hide an update.
+      e.respondWith(
+        fetch(e.request).then(res => {
+          const clone = res.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, clone));
+          return res;
+        }).catch(() => caches.match(e.request))
+      );
     });
   `;
   const swBlob = new Blob([swCode], { type: 'application/javascript' });
