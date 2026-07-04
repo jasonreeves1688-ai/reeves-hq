@@ -10302,6 +10302,10 @@ function saveNewChallenge() {
 // ═══════════════════════════════════════════
 //  STREAK BONUSES
 // ═══════════════════════════════════════════
+// Was referenced everywhere but never declared — same class of bug as `challenges` above
+let streakConfig = { enabled: true, milestones: [{ days: 3, bonus: 5 }, { days: 7, bonus: 15 }] };
+let currentStreaks = { ridley: 0, connor: 0 };
+
 function saveStreakConfig() {
   const milestones = [];
   [0, 1].forEach(i => {
